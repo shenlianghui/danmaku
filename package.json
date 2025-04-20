@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "vue-timeline-chart": "^3.0.1"
+  }
+}
