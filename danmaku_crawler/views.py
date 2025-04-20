@@ -18,7 +18,7 @@ class VideoViewSet(viewsets.ModelViewSet):
     """视频信息视图集"""
     queryset = Video.objects.all().order_by('-created_at')
     serializer_class = VideoSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]  # 允许所有人访问
     
     def get_queryset(self):
         """根据用户过滤视频列表"""
@@ -27,6 +27,10 @@ class VideoViewSet(viewsets.ModelViewSet):
         # 用户过滤逻辑
         user_param = self.request.query_params.get('user', None)
         
+        # 如果用户未登录，只返回空查询集
+        if not self.request.user.is_authenticated:
+            return Video.objects.none()
+            
         # 如果明确指定获取当前用户视频，或者默认情况下非管理员用户
         if user_param == 'current' or (user_param != 'all' and not self.request.user.is_staff):
             queryset = queryset.filter(user=self.request.user)
@@ -40,6 +44,12 @@ class VideoViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def crawl(self, request, pk=None):
         """触发爬取视频弹幕"""
+        # 检查用户是否登录
+        if not request.user.is_authenticated:
+            return Response({
+                'message': '您需要登录才能执行此操作'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+            
         video = self.get_object()
         
         # 创建一个任务对象
@@ -117,6 +127,12 @@ class VideoViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def my_videos(self, request):
         """获取当前用户的所有视频"""
+        # 检查用户是否登录
+        if not request.user.is_authenticated:
+            return Response({
+                'message': '您需要登录才能查看视频'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+            
         # 明确指定查询当前用户的视频
         videos = Video.objects.filter(user=request.user).order_by('-created_at')
         page = self.paginate_queryset(videos)
@@ -131,7 +147,7 @@ class DanmakuViewSet(viewsets.ReadOnlyModelViewSet):
     """弹幕数据视图集"""
     queryset = Danmaku.objects.all().order_by('progress')
     serializer_class = DanmakuSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]  # 允许所有人访问
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -145,6 +161,10 @@ class DanmakuViewSet(viewsets.ReadOnlyModelViewSet):
         # 用户过滤逻辑
         user_param = self.request.query_params.get('user', None)
         
+        # 如果用户未登录，只返回空查询集
+        if not self.request.user.is_authenticated:
+            return Danmaku.objects.none()
+            
         # 如果明确指定获取当前用户弹幕，或者默认情况下非管理员用户
         if user_param == 'current' or (user_param != 'all' and not self.request.user.is_staff):
             queryset = queryset.filter(video__user=self.request.user)
@@ -168,7 +188,7 @@ class CrawlTaskViewSet(viewsets.ReadOnlyModelViewSet):
     """爬取任务视图集"""
     queryset = CrawlTask.objects.all().order_by('-created_at')
     serializer_class = CrawlTaskSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]  # 允许所有人访问
     
     def get_queryset(self):
         """根据用户过滤任务列表"""
@@ -182,6 +202,10 @@ class CrawlTaskViewSet(viewsets.ReadOnlyModelViewSet):
         # 用户过滤逻辑
         user_param = self.request.query_params.get('user', None)
         
+        # 如果用户未登录，只返回空查询集
+        if not self.request.user.is_authenticated:
+            return CrawlTask.objects.none()
+            
         # 如果明确指定获取当前用户任务，或者默认情况下非管理员用户
         if user_param == 'current' or (user_param != 'all' and not self.request.user.is_staff):
             queryset = queryset.filter(user=self.request.user)
@@ -195,6 +219,12 @@ class CrawlTaskViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['post'])
     def create_task(self, request):
         """创建新的爬取任务"""
+        # 检查用户是否登录
+        if not request.user.is_authenticated:
+            return Response({
+                'message': '您需要登录才能创建爬取任务'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+            
         try:
             video_url = request.data.get('video_url', None)
             cookie_str = request.data.get('cookie_str', None)
@@ -311,6 +341,12 @@ class CrawlTaskViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def my_tasks(self, request):
         """获取当前用户的所有爬取任务"""
+        # 检查用户是否登录
+        if not request.user.is_authenticated:
+            return Response({
+                'message': '您需要登录才能查看任务'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+            
         tasks = CrawlTask.objects.filter(user=request.user).order_by('-created_at')
         page = self.paginate_queryset(tasks)
         if page is not None:

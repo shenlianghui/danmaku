@@ -39,9 +39,9 @@
             <el-dropdown @command="handleCommand" trigger="click">
               <span class="el-dropdown-link">
                 <el-avatar :size="32" class="user-avatar">
-                  {{ authStore.user ? authStore.user.username.substring(0, 1).toUpperCase() : 'U' }}
+                  {{ (authStore.user && authStore.user.username) ? authStore.user.username.substring(0, 1).toUpperCase() : 'U' }}
                 </el-avatar>
-                <span class="username">{{ authStore.user ? authStore.user.username : '用户' }}</span>
+                <span class="username">{{ authStore.user?.username || '用户' }}</span>
                 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </span>
               <template #dropdown>
@@ -187,14 +187,23 @@ const handleLogout = async () => {
       cancelButtonText: '取消',
       type: 'warning',
     })
-    await authStore.logout()
-    ElMessage.success('已退出登录')
-    // 登出后跳转到欢迎页
-    router.push({ name: 'Welcome' })
+    
+    try {
+      // 尝试调用登出API，但不依赖其成功与否
+      await authStore.logout()
+      ElMessage.success('已退出登录')
+    } catch (error) {
+      console.error('登出API调用失败，但仍将清除本地状态:', error)
+      // 即使API调用失败也强制清除本地状态
+      authStore.clearUserData()
+      ElMessage.success('已退出登录')
+    } finally {
+      // 无论如何都跳转到欢迎页
+      router.push({ name: 'Welcome' })
+    }
   } catch (err) {
     if (err !== 'cancel') {
-      ElMessage.error('退出登录失败')
-      console.error(err)
+      console.error('退出过程中发生错误:', err)
     }
   }
 }

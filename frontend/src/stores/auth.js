@@ -260,26 +260,21 @@ export const useAuthStore = defineStore('auth', {
             this.error = null;
             
             try {
-                const response = await apiClient.post('logout/');
-                
-                // 无论成功与否，都清除状态
-                this.user = null;
-                this.isAuthenticated = false;
-                clearStorage();
-                
-                return { success: true };
+                // 尝试调用后端登出API
+                await apiClient.post('logout/');
+                console.log('成功调用登出API');
             } catch (error) {
+                // 捕获但忽略API错误，无论成功与否都清除本地状态
+                console.warn('登出API请求失败，错误码:', error?.response?.status || 'unknown');
+            } finally {
+                // 不管API是否成功，都清除本地状态
                 this.user = null;
                 this.isAuthenticated = false;
                 clearStorage();
-                
-                return { 
-                    success: false,
-                    error: '登出失败，但已在本地清除登录状态'
-                };
-            } finally {
                 this.loading = false;
             }
+            
+            return { success: true };
         },
         
         // 更新用户资料

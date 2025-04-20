@@ -160,7 +160,7 @@ class LoginView(APIView):
 
 # 登出视图
 class LogoutView(APIView):
-    permission_classes = (permissions.IsAuthenticated,)
+    permission_classes = (permissions.AllowAny,)
 
     def post(self, request, *args, **kwargs):
         logout(request)
@@ -171,17 +171,28 @@ class LogoutView(APIView):
 
 # 获取当前用户信息
 class UserView(generics.RetrieveAPIView):
-    permission_classes = (permissions.IsAuthenticated,)
+    permission_classes = (permissions.AllowAny,)  # 允许所有用户访问
     serializer_class = UserSerializer
 
     def get_object(self):
+        if not self.request.user.is_authenticated:
+            return None
         return self.request.user
         
     def retrieve(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            # 未登录用户返回空数据，不返回403错误
+            return Response({
+                "user": None,
+                "authenticated": False,
+                "status": "success"
+            })
+            
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return Response({
             "user": serializer.data,
+            "authenticated": True,
             "status": "success"
         })
 

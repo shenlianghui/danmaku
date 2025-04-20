@@ -1,5 +1,5 @@
 from django.shortcuts import get_object_or_404
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db import transaction
@@ -25,6 +25,7 @@ class AnalysisViewSet(viewsets.ReadOnlyModelViewSet):
     """弹幕分析结果视图集"""
     queryset = DanmakuAnalysis.objects.all().order_by('-created_at')
     serializer_class = AnalysisSerializer
+    permission_classes = [permissions.AllowAny]  # 允许所有人访问
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -77,6 +78,12 @@ class AnalysisViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['post'])
     def analyze(self, request):
         """触发弹幕分析"""
+        # 检查用户是否登录
+        if not request.user.is_authenticated:
+            return Response({
+                'message': '您需要登录才能执行分析'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+            
         # 从请求中获取参数
         bvid = request.data.get('bvid')
         analysis_type = request.data.get('type', None)  # 如果不指定类型，则进行所有分析
@@ -423,6 +430,7 @@ class KeywordViewSet(viewsets.ReadOnlyModelViewSet):
     """关键词提取结果视图集"""
     queryset = KeywordExtraction.objects.all().order_by('-weight')
     serializer_class = KeywordSerializer
+    permission_classes = [permissions.AllowAny]  # 允许所有人访问
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -439,6 +447,7 @@ class SentimentViewSet(viewsets.ReadOnlyModelViewSet):
     """情感分析结果视图集"""
     queryset = SentimentAnalysis.objects.all().order_by('segment_start')
     serializer_class = SentimentSerializer
+    permission_classes = [permissions.AllowAny]  # 允许所有人访问
     
     def get_queryset(self):
         queryset = super().get_queryset()
