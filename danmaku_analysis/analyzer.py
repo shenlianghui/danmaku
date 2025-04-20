@@ -326,19 +326,19 @@ class DanmakuAnalyzer:
             defaults={'result_json': result}
         )
         
-        # 保存详细的情感分析记录
-        sentiment_status = 'positive' if sentiment_score > 0.1 else ('negative' if sentiment_score < -0.1 else 'neutral')
-        SentimentAnalysis.objects.update_or_create(
-            video=self.video,
-            defaults={
-                'positive_count': sentiment_counts['positive'],
-                'neutral_count': sentiment_counts['neutral'],
-                'negative_count': sentiment_counts['negative'],
-                'sentiment_score': sentiment_score,
-                'sentiment_status': sentiment_status,
-                'used_bert': used_bert
-            }
-        )
+        # # 保存详细的情感分析记录 (此部分代码尝试写入的字段与 SentimentAnalysis 模型不符，且整体结果已保存在 DanmakuAnalysis 中，故注释掉)
+        # sentiment_status = 'positive' if sentiment_score > 0.1 else ('negative' if sentiment_score < -0.1 else 'neutral')
+        # SentimentAnalysis.objects.update_or_create(
+        #     video=self.video,
+        #     defaults={
+        #         'positive_count': sentiment_counts['positive'],
+        #         'neutral_count': sentiment_counts['neutral'],
+        #         'negative_count': sentiment_counts['negative'],
+        #         'sentiment_score': sentiment_score,
+        #         'sentiment_status': sentiment_status,
+        #         'used_bert': used_bert
+        #     }
+        # )
         
         return result
     
@@ -415,32 +415,21 @@ class DanmakuAnalyzer:
     def analyze_timeline(self):
         """时间线分析，处理分P视频
         
-        现在返回基于视频总时长的绝对时间线，并包含分P边界信息。
+        使用相对于分P的 progress 计算绝对时间线，并返回分P边界。
         """
         if not self.danmakus:
             logger.warning(f"视频 {self.video.bvid} 没有弹幕数据，无法进行时间线分析")
-            return {
-                'timeline': [],
-                'peaks': [],
-                'episode_boundaries': [], # 新增
-                'total_count': 0
-            }
+            return { 'timeline': [], 'peaks': [], 'episode_boundaries': [], 'total_count': 0 }
 
         # --- 计算分P边界 ---
         episode_boundaries = []
         current_start_time = 0
-        # 确保 self.page_info 已排序且有数据
         if self.page_info and all('page_id' in p and 'duration' in p for p in self.page_info):
-            # 确保按 page_id 排序 (理论上 __init__ 中已排序)
             sorted_page_info = sorted(self.page_info, key=lambda p: p.get('page_id', 0))
-
             for page in sorted_page_info:
                  page_id = page.get('page_id')
-                 # 如果 duration 为 None 或无效，尝试给个默认值或警告
                  duration = page.get('duration') if page.get('duration') is not None and page.get('duration') >= 0 else 0
-                 if duration == 0:
-                      logger.warning(f"分P {page_id} 时长为 0 或无效，边界计算可能不准确")
-
+                 if duration == 0: logger.warning(f"分P {page_id} 时长为 0 或无效")
                  end_time = current_start_time + duration
                  episode_boundaries.append({
                      'page_id': page_id,
@@ -448,73 +437,83 @@ class DanmakuAnalyzer:
                      'end_time_sec': end_time,
                      'duration_sec': duration
                  })
-                 current_start_time = end_time # 下一个分P的开始时间是上一个的结束时间
+                 current_start_time = end_time
         else:
              logger.error(f"无法计算分P边界: self.page_info 格式错误或为空: {self.page_info}")
-             # 可以尝试基于视频总时长创建一个默认边界
              if self.video.duration > 0:
-                  episode_boundaries = [{
-                       'page_id': 1,
-                       'start_time_sec': 0,
-                       'end_time_sec': self.video.duration,
-                       'duration_sec': self.video.duration
-                  }]
+                  episode_boundaries = [{'page_id': 1, 'start_time_sec': 0, 'end_time_sec': self.video.duration, 'duration_sec': self.video.duration}]
 
+        # 创建一个快速查找分P开始时间的字典
+        page_start_times = {b['page_id']: b['start_time_sec'] for b in episode_boundaries}
 
-        # --- 准备时间线数据 (不再需要按 page_id 分组处理 timeline 本身) ---
-        # 使用 defaultdict 按视频进度统计弹幕数量 (按绝对秒数)
+        # --- 准备时间线数据  ---
+        # 使用 defaultdict 按视频进度统计弹幕数量 (按计算出的绝对秒数)
         timeline_data = collections.defaultdict(int)
+        valid_danmaku_count = 0
         for d in self.danmakus:
-            if d.progress is not None:
+            if d.progress is not None and d.page_id is not None:
                 try:
-                    # progress 是绝对毫秒数
-                    second = int(float(d.progress) / 1000)
-                    if second >= 0:
-                        timeline_data[second] += 1
+                    # 获取该弹幕所属分P的绝对开始时间
+                    page_start_sec = page_start_times.get(d.page_id)
+                    if page_start_sec is None:
+                         logger.warning(f"弹幕 (dmid: {d.dmid}) 的 page_id ({d.page_id}) 未在 boundaries 中找到，跳过")
+                         continue
+
+                    # progress 是相对于分P的毫秒数
+                    relative_sec = float(d.progress) / 1000
+
+                    # 计算绝对秒数
+                    absolute_sec = int(page_start_sec + relative_sec)
+
+                    # 确保计算出的绝对秒数非负
+                    if absolute_sec >= 0:
+                        timeline_data[absolute_sec] += 1
+                        valid_danmaku_count += 1
+                    else:
+                        # 这个情况理论上不应该发生，除非 page_start_sec 为负数？
+                        logger.warning(f"计算出的绝对秒数 ({absolute_sec}) 为负数。Page Start: {page_start_sec}, Relative Sec: {relative_sec}. 跳过弹幕 dmid: {d.dmid}")
+
                 except (ValueError, TypeError):
-                    # logger.warning(f"无法处理弹幕进度值: {d.progress} (dmid: {d.dmid})，跳过此弹幕") # 减少日志噪音
+                    logger.warning(f"无法处理弹幕进度值: {d.progress} (dmid: {d.dmid})，跳过此弹幕") # 减少日志
                     continue
+            else:
+                #  缺少 progress 或 page_id 的弹幕无法定位
+                 logger.warning(f"弹幕缺少 progress 或 page_id, dmid: {d.dmid}, page_id: {d.page_id}, progress: {d.progress}")
+                 pass
 
         if not timeline_data:
-            logger.warning(f"视频 {self.video.bvid} 没有有效的弹幕时间数据 (timeline_data is empty)")
-            # 仍然返回空的 timeline 和 peaks，但包含计算出的 boundaries (如果可能)
-            return {
-                'timeline': [],
-                'peaks': [],
-                'episode_boundaries': episode_boundaries,
-                'total_count': len(self.danmakus)
-            }
+            logger.warning(f"视频 {self.video.bvid} 计算后没有有效的弹幕时间数据 (timeline_data is empty)")
+            return { 'timeline': [], 'peaks': [], 'episode_boundaries': episode_boundaries, 'total_count': len(self.danmakus) }
 
-
-        # 转换为列表格式，需要保留 page_id 用于峰值计算
-        # 我们需要一种方法将绝对秒数映射回它所属的 page_id
-        # 创建一个查找函数或字典
-        def get_page_id_for_time(abs_sec):
+        # --- 准备 full_timeline (逻辑不变，因为 time 已经是绝对秒数) ---
+        # 创建一个查找函数或字典 (复用之前的逻辑，用于添加 page_id 到 timeline 点)
+        def get_page_id_for_abs_time(abs_sec):
+            # 优先检查最后一个边界（因为时间点可能等于结束时间）
+            last_boundary = episode_boundaries[-1] if episode_boundaries else None
+            if last_boundary and abs_sec == last_boundary['end_time_sec']:
+                return last_boundary['page_id']
+            # 检查其他边界 [start, end)
             for boundary in episode_boundaries:
-                # 边界是左闭右开 [start, end)
                 if boundary['start_time_sec'] <= abs_sec < boundary['end_time_sec']:
                     return boundary['page_id']
-                # 处理正好在最后一个分P结束时间点的情况
-                if abs_sec == boundary['end_time_sec'] and abs_sec == episode_boundaries[-1]['end_time_sec']:
-                     return boundary['page_id']
-            # 如果时间超出所有边界 (理论上不应发生，除非数据或边界计算有问题)
-            # logger.warning(f"时间点 {abs_sec} 未找到对应的分P边界")
-            return episode_boundaries[-1]['page_id'] if episode_boundaries else 1 # 默认返回最后一个或第一个
+            # 如果都不匹配（理论上不应发生），返回最后一个或默认值
+            logger.warning(f"时间点 {abs_sec} 未匹配到任何分P边界，将归类到最后一个分P")
+            return last_boundary['page_id'] if last_boundary else 1
 
         full_timeline = [
-            {'time': t, 'count': c, 'page_id': get_page_id_for_time(t)}
+            {'time': t, 'count': c, 'page_id': get_page_id_for_abs_time(t)}
             for t, c in timeline_data.items()
         ]
-        full_timeline.sort(key=lambda x: x['time']) # 按绝对时间排序
+        full_timeline.sort(key=lambda x: x['time'])
 
-        # --- 峰值检测 (现在基于 full_timeline 进行，但峰值点也需包含 page_id) ---
-        # 从配置加载峰值检测参数 (这段逻辑不变)
+        # --- 峰值检测 (逻辑不变，基于绝对时间的 full_timeline) ---
+        # ... (加载配置, 计算 avg, std, threshold, min_peak_count_dynamic) ...
         try:
             timeline_config = analyzer_config.TIMELINE_ANALYSIS
             peak_std_threshold = timeline_config.get('peak_std_threshold', 1.5)
             min_peak_count_abs = timeline_config.get('min_peak_count_abs', 5)
             min_peak_count_ratio = timeline_config.get('min_peak_count_ratio', 0.05)
-            top_n_peaks_total = timeline_config.get('top_n_peaks_total', 20) # 总共返回的峰值数量
+            top_n_peaks_total = timeline_config.get('top_n_peaks_total', 20)
         except AttributeError:
             logger.warning("analyzer_config.py 中缺少 TIMELINE_ANALYSIS 配置, 使用默认值")
             peak_std_threshold = 1.5
@@ -524,32 +523,26 @@ class DanmakuAnalyzer:
 
         counts = [item['count'] for item in full_timeline]
         all_peaks = []
-        if counts: # 确保有数据
+        if counts:
             avg_count = np.mean(counts)
             std_count = np.std(counts) if len(counts) > 1 else 0.0
             threshold = avg_count + peak_std_threshold * std_count + 1e-6
             min_peak_count_dynamic = max(1, min_peak_count_abs, int(avg_count * min_peak_count_ratio))
 
-            # 筛选峰值点 (从整个时间线筛选)
-            peak_candidates = [
-                item for item in full_timeline
-                if item['count'] > threshold and item['count'] >= min_peak_count_dynamic
-            ]
-            # 按弹幕数量降序排序
+            peak_candidates = [ item for item in full_timeline if item['count'] > threshold and item['count'] >= min_peak_count_dynamic ]
             peak_candidates.sort(key=lambda x: x['count'], reverse=True)
-            # 取全局前 N 个峰值
             all_peaks = peak_candidates[:top_n_peaks_total]
-            # 不需要再按 page_id 排序峰值，前端可以根据需要过滤
 
-        # --- 准备最终结果 ---
+
+        # --- 准备最终结果 (结构不变) ---
         result = {
-            'timeline': full_timeline,         # 绝对时间线数据点
-            'peaks': all_peaks,                # 全局峰值点 (带 page_id)
-            'episode_boundaries': episode_boundaries, # 新增：分P边界
-            'total_count': len(self.danmakus)
+            'timeline': full_timeline,
+            'peaks': all_peaks,
+            'episode_boundaries': episode_boundaries,
+            'total_count': len(self.danmakus) # 或者用 valid_danmaku_count 更准确? 但 total_count 可能指数据库总数
         }
 
-        # 保存分析结果
+        # --- 保存分析结果 (逻辑不变) ---
         DanmakuAnalysis.objects.update_or_create(
             video=self.video,
             analysis_type='timeline',
@@ -597,7 +590,7 @@ class DanmakuAnalyzer:
         # 保存分析结果
         DanmakuAnalysis.objects.update_or_create(
             video=self.video,
-            analysis_type='user',
+            analysis_type='user_activity',
             defaults={'result_json': result}
         )
         

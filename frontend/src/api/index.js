@@ -22,6 +22,13 @@ api.interceptors.response.use(
       // 服务器返回了错误状态码
       console.error('状态码:', error.response.status);
       console.error('响应数据:', error.response.data);
+      
+      // 处理401未授权错误
+      if (error.response.status === 401) {
+        console.warn('用户未登录或会话已过期');
+        // 可以在这里添加重定向到登录页面的逻辑
+        // window.location.href = '/login';
+      }
     } else if (error.request) {
       // 请求已发送但没有收到响应
       console.error('请求已发送但无响应');

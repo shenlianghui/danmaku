@@ -13,12 +13,64 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from datetime import datetime
+import traceback
+
+# 声明全局变量
+transformers = None
+MODEL_CLASS = None
+TOKENIZER_CLASS = None
+
+# 用于确保所有必要的模块都能正确导入
+def ensure_modules_imported():
+    """确保所有必要的模块都能正确导入"""
+    # 明确声明全局变量
+    global transformers, MODEL_CLASS, TOKENIZER_CLASS
+    
+    try:
+        # 导入主模块
+        import transformers
+        # 导入必要的类
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        # 给全局变量赋值
+        MODEL_CLASS = AutoModelForSequenceClassification
+        TOKENIZER_CLASS = AutoTokenizer
+        return True
+    except ImportError as e:
+        logging.error(f"导入transformers模块失败: {str(e)}")
+        
+        try:
+            # 尝试安装
+            import subprocess
+            logging.info("尝试安装transformers...")
+            subprocess.run([sys.executable, "-m", "pip", "install", "transformers", "torch", "-i", "https://mirrors.aliyun.com/pypi/simple/"],
+                          check=True, timeout=300)
+            
+            # 在安装成功后重新导入
+            import transformers
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+            # 在导入成功后给全局变量赋值
+            MODEL_CLASS = AutoModelForSequenceClassification
+            TOKENIZER_CLASS = AutoTokenizer
+            return True
+        except Exception as install_err:
+            logging.error(f"安装transformers失败: {str(install_err)}")
+            transformers = None
+            MODEL_CLASS = None
+            TOKENIZER_CLASS = None
+            return False
+
 # 尝试导入transformers包
 try:
     import transformers
-    from transformers import BertForSequenceClassification, BertTokenizer
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    MODEL_CLASS = AutoModelForSequenceClassification
+    TOKENIZER_CLASS = AutoTokenizer
 except ImportError:
     transformers = None
+    MODEL_CLASS = None
+    TOKENIZER_CLASS = None
+    # 尝试自动修复导入
+    ensure_modules_imported()
 
 from django.conf import settings
 from . import analyzer_config
@@ -103,6 +155,11 @@ class BertSentimentAnalyzer:
     
     def __init__(self):
         """初始化BERT情感分析模型"""
+        # 确保所有必要的模块都已导入
+        if MODEL_CLASS is None or TOKENIZER_CLASS is None:
+            logger.info("初始化时发现必要模块未导入，尝试重新导入")
+            ensure_modules_imported()
+            
         self.model = None
         self.tokenizer = None
         self.model_loaded = False
@@ -184,6 +241,9 @@ class BertSentimentAnalyzer:
         Returns:
             加载是否成功
         """
+        # 声明使用到的全局变量
+        global transformers, MODEL_CLASS, TOKENIZER_CLASS
+        
         # 使用锁确保只有一个线程能加载模型
         with self.load_lock:
             if self.model_loaded and not force_reload:
@@ -191,11 +251,39 @@ class BertSentimentAnalyzer:
                 
             try:
                 logger.info(f"正在从{self.model_path}加载BERT模型...")
+                logger.info(f"当前Python路径: {sys.executable}")
+                logger.info(f"transformers版本: {transformers.__version__ if transformers else 'None'}")
+                logger.info(f"MODEL_CLASS: {MODEL_CLASS}")
+                logger.info(f"TOKENIZER_CLASS: {TOKENIZER_CLASS}")
+                
                 start_time = time.time()
                 
                 try:
-                    self.tokenizer = BertTokenizer.from_pretrained(self.model_path)
-                    self.model = BertForSequenceClassification.from_pretrained(self.model_path)
+                    # 先确保已导入必要类
+                    if TOKENIZER_CLASS is None or MODEL_CLASS is None:
+                        logger.error("transformers类未正确导入，尝试重新导入")
+                        import transformers
+                        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+                        MODEL_CLASS = AutoModelForSequenceClassification
+                        TOKENIZER_CLASS = AutoTokenizer
+                        logger.info(f"重新导入后: MODEL_CLASS={MODEL_CLASS}, TOKENIZER_CLASS={TOKENIZER_CLASS}")
+                    
+                    # 验证模型路径是否存在
+                    if not os.path.exists(self.model_path):
+                        logger.error(f"模型路径不存在: {self.model_path}")
+                        raise FileNotFoundError(f"模型路径不存在: {self.model_path}")
+                    
+                    # 检查模型文件
+                    model_files = os.listdir(self.model_path)
+                    logger.info(f"模型文件夹内容: {model_files}")
+                    
+                    logger.info("开始加载tokenizer...")
+                    self.tokenizer = TOKENIZER_CLASS.from_pretrained(self.model_path)
+                    logger.info("tokenizer加载成功！")
+                    
+                    logger.info("开始加载model...")
+                    self.model = MODEL_CLASS.from_pretrained(self.model_path)
+                    logger.info("model加载成功！")
                 except Exception as load_err:
                     logger.error(f"首次尝试加载模型失败: {str(load_err)}")
                     logger.info("尝试使用pip安装transformers...")
@@ -204,16 +292,25 @@ class BertSentimentAnalyzer:
                     try:
                         # 尝试安装transformers
                         subprocess.run([sys.executable, "-m", "pip", "install", "transformers", "-i", "https://mirrors.aliyun.com/pypi/simple/"], 
-                        check=True, timeout=300)
+                            check=True, timeout=300)
                         logger.info("transformers安装成功，重新尝试加载模型")
                         
                         # 重新导入
-                        importlib.reload(transformers)
-                        from transformers import BertForSequenceClassification, BertTokenizer
+                        if 'transformers' in sys.modules:
+                            importlib.reload(transformers)
+                        else:
+                            import transformers
+                            
+                        # 从transformers导入必要的类
+                        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+                        
+                        # 更新全局引用
+                        MODEL_CLASS = AutoModelForSequenceClassification
+                        TOKENIZER_CLASS = AutoTokenizer
                         
                         # 再次尝试加载模型
-                        self.tokenizer = BertTokenizer.from_pretrained(self.model_path)
-                        self.model = BertForSequenceClassification.from_pretrained(self.model_path)
+                        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+                        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_path)
                     except Exception as install_err:
                         logger.error(f"安装transformers失败: {str(install_err)}")
                         raise
@@ -511,6 +608,14 @@ class BertSentimentAnalyzer:
             total_start_time = time.time()
             logger.info(f"开始处理{len(texts_to_process)}条文本，批大小: {batch_size}")
             
+            # 检查tokenizer和model是否可用
+            if self.tokenizer is None or self.model is None:
+                logger.error("分批处理时tokenizer或model为None，尝试重新加载")
+                self.load_model(force_reload=True)
+                if self.tokenizer is None or self.model is None:
+                    logger.error("模型重新加载失败，使用备用方案")
+                    return self.fallback_sentiment_analysis(texts)
+            
             # 分批处理
             batch_results = []
             total_batches = (len(texts_to_process) + batch_size - 1) // batch_size
@@ -681,13 +786,23 @@ class BertSentimentAnalyzer:
             否则返回预测的情感标签和得分
         """
         if not self.is_model_loaded():
+            logger.info("模型未加载，尝试加载模型")
             if not self.load_model():
+                logger.error("模型加载失败，返回错误")
                 return {"error": "模型未加载"}
         
         # 对输入文本进行预处理
         processed_text = self.preprocess_text(text)
         
         try:
+            # 检查tokenizer和model是否可用
+            if self.tokenizer is None or self.model is None:
+                logger.error("tokenizer或model为None，尝试重新加载")
+                self.load_model(force_reload=True)
+                if self.tokenizer is None or self.model is None:
+                    return {"error": "tokenizer或model加载失败"}
+            
+            logger.debug(f"开始预测文本: {processed_text[:50]}...")
             # 预处理文本
             inputs = self.tokenizer(processed_text, return_tensors="pt", truncation=True, max_length=128)
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
@@ -699,8 +814,11 @@ class BertSentimentAnalyzer:
                 
                 # 获取预测结果
                 predicted_class = torch.argmax(predictions, dim=1).item()
-                sentiment_label = self.label_map[predicted_class]
+                sentiment_label = self.label_map.get(predicted_class, 'unknown') # 使用 get 防止 KeyErrror
                 confidence = predictions[0][predicted_class].item()
+                
+                # 添加日志，打印原始预测类别和置信度
+                logger.info(f"原始预测 => 文本: '{processed_text[:50]}...', 类别ID: {predicted_class}, 置信度: {confidence:.4f}, 映射标签: {sentiment_label}")
                 
                 if return_all_scores:
                     # 返回所有类别的得分
@@ -716,6 +834,8 @@ class BertSentimentAnalyzer:
                     }
         
         except Exception as e:
+            logger.error(f"预测失败: {str(e)}")
+            logger.error(f"异常详情: {traceback.format_exc()}")
             return {"error": f"预测失败: {str(e)}"}
     
     def batch_predict(self, texts, batch_size=16):
