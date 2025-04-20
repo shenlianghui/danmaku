@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package bilibili.community.service.dm.v1;
+
+// 弹幕元素
+message DanmakuElem {
+    int32 stime = 2;        // 弹幕时间（秒）
+    int32 mode = 3;         // 弹幕模式
+    int32 size = 4;         // 字体大小
+    uint32 color = 5;       // 颜色（RGB 格式）
+    string uhash = 6;       // 用户哈希
+    string text = 7;        // 弹幕内容
+    int64 date = 8;         // 时间戳
+    int32 weight = 9;       // 权重
+    string action = 10;     // 动作
+    int32 pool = 11;        // 弹幕池
+    string dmid = 12;       // 弹幕 ID
+    int32 attr = 13;        // 属性
+    string animation = 22;  // 动画
+    DmColorfulType colorful = 24; // 彩色弹幕类型
+    int64 oid = 26;         // 视频 ID
+    DmFromType dmFrom = 27; // 弹幕来源
+}
+
+// 弹幕分片响应
+message DmSegMobileReply {
+    repeated DanmakuElem elems = 1; // 弹幕列表
+    repeated DmColorful colorfulSrc = 5; // 彩色弹幕资源
+}
+
+// 彩色弹幕类型
+enum DmColorfulType {
+    NoneType = 0;
+    VipGradualColor = 60001;
+}
+
+// 弹幕来源类型
+enum DmFromType {
+    DmFromUnknown = 0;
+    DmFromNormal = 1;
+    DmFromCmd = 2;
+    DmFromLive = 3;
+}
+
+// 彩色弹幕
+message DmColorful {
+    DmColorfulType type = 1; // 类型
+    string src = 2;          // 资源地址
+}

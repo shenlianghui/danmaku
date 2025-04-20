@@ -1,0 +1,184 @@
+:root {
+  /* B站主题色系 */
+  --primary-color: #fb7299;
+  --primary-light: #ff93b1;
+  --primary-dark: #d6517a;
+  
+  --secondary-color: #00a1d6;
+  --secondary-light: #5cceff;
+  --secondary-dark: #0088b8;
+  
+  /* 中性色 */
+  --grey-100: #f7f8fa;
+  --grey-200: #e9ebf0;
+  --grey-300: #dcdfe6;
+  --grey-400: #c0c4cc;
+  --grey-500: #909399;
+  --grey-600: #606266;
+  --grey-700: #303133;
+
+  /* 功能性颜色 */
+  --success-color: #67c23a;
+  --warning-color: #e6a23c;
+  --danger-color: #f56c6c;
+  --info-color: #909399;
+
+  /* 阴影 */
+  --shadow-base: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  --shadow-light: 0 2px 8px 0 rgba(0, 0, 0, 0.06);
+  --shadow-large: 0 4px 20px 0 rgba(0, 0, 0, 0.15);
+  --shadow-primary: 0 5px 20px rgba(251, 114, 153, 0.3);
+  --shadow-secondary: 0 5px 20px rgba(0, 161, 214, 0.3);
+
+  /* 过渡动画 */
+  --transition-base: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+  --transition-fade: all 0.15s cubic-bezier(0.645, 0.045, 0.355, 1);
+  --transition-bounce: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* 字体 */
+  --font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
+  
+  /* 卡片圆角 */
+  --border-radius-small: 4px;
+  --border-radius-base: 8px;
+  --border-radius-large: 16px;
+}
+
+/* 全局样式重置 */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: var(--font-family);
+  color: var(--grey-700);
+  background-color: var(--grey-100);
+}
+
+/* 常用辅助类 */
+.text-primary {
+  color: var(--primary-color);
+}
+
+.text-secondary {
+  color: var(--secondary-color);
+}
+
+.bg-primary {
+  background-color: var(--primary-color);
+}
+
+.bg-secondary {
+  background-color: var(--secondary-color);
+}
+
+.shadow-hover {
+  transition: var(--transition-bounce);
+}
+
+.shadow-hover:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--shadow-large);
+}
+
+.card-hover {
+  transition: var(--transition-base);
+}
+
+.card-hover:hover {
+  transform: translateY(-5px) scale(1.01);
+  box-shadow: var(--shadow-large);
+}
+
+/* 动画效果 */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.fade-in {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+.slide-up {
+  animation: slideUp 0.5s ease-out;
+}
+
+.pulse {
+  animation: pulse 2s infinite;
+}
+
+/* B站风格按钮 */
+.btn-bilibili {
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: var(--border-radius-base);
+  padding: 10px 20px;
+  font-weight: 600;
+  transition: var(--transition-base);
+  cursor: pointer;
+}
+
+.btn-bilibili:hover {
+  background-color: var(--primary-dark);
+  box-shadow: var(--shadow-primary);
+}
+
+.btn-bilibili-outline {
+  background-color: transparent;
+  color: var(--primary-color);
+  border: 2px solid var(--primary-color);
+  border-radius: var(--border-radius-base);
+  padding: 8px 18px;
+  font-weight: 600;
+  transition: var(--transition-base);
+  cursor: pointer;
+}
+
+.btn-bilibili-outline:hover {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+/* 卡片样式 */
+.bilibili-card {
+  background: white;
+  border-radius: var(--border-radius-large);
+  box-shadow: var(--shadow-base);
+  padding: 20px;
+  transition: var(--transition-base);
+}
+
+.bilibili-card:hover {
+  box-shadow: var(--shadow-large);
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--grey-100);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--grey-400);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--grey-500);
+} 
