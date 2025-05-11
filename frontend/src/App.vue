@@ -41,7 +41,7 @@
                 <el-avatar :size="32" class="user-avatar">
                   {{ (authStore.user && authStore.user.username) ? authStore.user.username.substring(0, 1).toUpperCase() : 'U' }}
                 </el-avatar>
-                <span class="username">{{ authStore.user?.username || '用户' }}</span>
+                <span class="username">{{ authStore.user.username || '用户' }}</span>
                 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </span>
               <template #dropdown>

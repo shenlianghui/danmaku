@@ -9,8 +9,9 @@ SENTIMENT_ANALYSIS = {
     'default_batch_size': 64,       # 默认批处理大小
     'max_text_length': 128,         # 最大文本长度
     'max_sample_size': 15000,       # 最大采样数量，超过此数量将进行随机采样
-    'auto_downgrade_threshold': 10000,  # 自动降级阈值，超过此数量将使用简单分析
+    'auto_downgrade_threshold': 100000,  # 自动降级阈值，超过此数量将使用简单分析
     'max_processing_time': 300,     # 最大处理时间（秒）
+    'segment_duration_seconds': 300,  # 情感分析时间段长度（秒）
     'score_thresholds': {           # 情感得分阈值
         'very_positive': 0.5,       # 非常正面
         'positive': 0.1,            # 正面
@@ -97,5 +98,5 @@ PERFORMANCE = {
     'cache_results': True,          # 是否缓存分析结果
     'cache_ttl': 3600 * 24,         # 缓存有效期(秒)，默认1天
     'batch_processing': True,       # 是否使用批处理
-    'timeout_seconds': 300,         # 分析超时时间(秒)
+    'timeout_seconds': 600,         # 分析超时时间(秒)
 } 

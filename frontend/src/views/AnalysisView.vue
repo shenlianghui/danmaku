@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="analysis-view-container">
     <el-row :gutter="20">
       <el-col :span="24">
@@ -24,30 +24,6 @@
       </el-col>
     </el-row>
     
-    <el-row :gutter="20" class="analysis-controls">
-      <el-col :span="24">
-        <el-card>
-          <div class="actions-header">
-            <h2>分析控制</h2>
-          </div>
-          <div class="analysis-options">
-            <el-checkbox-group v-model="selectedAnalysisOptions">
-              <el-checkbox label="emotion">情感分析</el-checkbox>
-              <el-checkbox label="keyword">关键词提取</el-checkbox>
-              <el-checkbox label="topic">话题聚类</el-checkbox>
-              <el-checkbox label="timeline">时间线分析</el-checkbox>
-            </el-checkbox-group>
-          </div>
-          <div class="action-buttons">
-            <el-button type="primary" @click="runAllAnalysis" :loading="isAnalyzing" :disabled="!danmakuData || !danmakuData.length || selectedAnalysisOptions.length === 0">一键分析</el-button>
-            <el-tooltip content="采用简化模型，处理速度更快" placement="top">
-              <el-checkbox v-model="useSimpleMode" class="simple-mode-option">简化模式</el-checkbox>
-            </el-tooltip>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-    
     <!-- 关键词分析 -->
     <el-row :gutter="20" class="analysis-result" v-if="keywordResult">
       <el-col :span="24">
@@ -67,14 +43,6 @@
                 <el-table-column label="权重" width="100">
                   <template #default="{ row }">
                     {{ row && row.weight ? (row.weight * 100).toFixed(2) + '%' : '0%' }}
-                  </template>
-                </el-table-column>
-                <el-table-column label="占比">
-                  <template #default="{ row }">
-                    <el-progress 
-                      :percentage="row && row.weight ? row.weight * 100 : 0" 
-                      :color="getRandomColor(row ? row.keyword : '')">
-                    </el-progress>
                   </template>
                 </el-table-column>
               </el-table>
@@ -140,8 +108,28 @@
           </div>
           
           <div class="sentiment-charts">
-            <!-- <div class="sentiment-timeline" ref="sentimentTimelineChart"></div> -->
-            <div class="sentiment-timeline">情感时间线图表待替换</div>
+            <div class="sentiment-timeline">
+              <LineChart 
+                v-if="formattedSentimentData.length > 0"
+                :viewportStart="0"
+                :viewportEnd="video.duration ? video.duration * 1000 : 600000" 
+                :data="formattedSentimentData" 
+                :height="350"
+                :lineColor="'rgba(245, 108, 108, 0.8)'"
+                :fillColor="'rgba(245, 108, 108, 0.2)'"
+                :lineWidth="2"
+                :pointRadius="4"
+                :smooth="true"
+                :showGrid="true"
+                :colorPoints="true"
+                :getPointColor="getSentimentPointColor"
+                :tooltipFormatter="formatSentimentTooltip"
+                :yAxisMin="0"
+                :yAxisMax="1"
+                yAxisLabel="情感得分"
+              />
+              <el-empty v-else description="暂无情感时间线数据"></el-empty>
+            </div>
             
             <div class="sentiment-table-container">
               <el-table :data="sentimentSegments" style="width: 100%" max-height="400">
@@ -196,11 +184,11 @@
           <!-- 添加分P导航 -->
           <div class="episode-navigation" v-if="episodeBoundaries && episodeBoundaries.length > 1">
             <el-radio-group v-model="currentEpisode" size="small" @change="handleEpisodeChange">
-              <el-radio-button :label="null">整体</el-radio-button>
+              <el-radio-button :value="null">整体</el-radio-button>
               <el-radio-button 
                 v-for="boundary in episodeBoundaries" 
                 :key="boundary.page_id" 
-                :label="boundary.page_id"
+                :value="boundary.page_id"
               >P{{ boundary.page_id }}</el-radio-button>
             </el-radio-group>
           </div>
@@ -231,7 +219,7 @@
               :initial-viewport-end="timelineViewport.max"
               :min-viewport-duration="1000 * 5"  
               :max-viewport-duration="video.duration ? video.duration * 1000 * 1.2 : 1000 * 60 * 60 * 24" 
-              renderTimestampLabel="custom"
+              :renderTimestampLabel="formatCustomTimestamp"
               :scales="getCustomScales()"
               :minTimestampWidth="60"
               @clickTimeline="handleClickTimeline"
@@ -252,7 +240,7 @@
                   :viewportStart="viewportStart" 
                   :viewportEnd="viewportEnd" 
                   :data="formattedTimelineData"
-                  :height="400" 
+                  :height="380" 
                   :lineColor="'rgba(64, 158, 255, 0.9)'"
                   :fillColor="'rgba(64, 158, 255, 0.1)'"
                   :lineWidth="2"
@@ -366,12 +354,7 @@
               </el-col>
             </el-row>
           </div>
-          
-          <div class="user-distribution">
-            <h3>弹幕发送分布</h3>
-            <!-- <div class="user-distribution-chart" ref="userDistributionChart"></div> -->
-            <div class="user-distribution-chart">用户分布图表待替换</div>
-          </div>
+        
           
           <div class="top-users">
             <h3>活跃用户排行</h3>
@@ -460,7 +443,6 @@ export default {
       // 新增的变量
       selectedAnalysisOptions: ['emotion', 'keyword', 'topic', 'timeline'],
       showTimelineAnalysis: true,
-      peakTimes: [],
       danmakuData: [],
       apiBaseUrl: process.env.VUE_APP_API_BASE_URL,
       showAllEpisodes: false,
@@ -571,7 +553,7 @@ export default {
             }
             
             this.$nextTick(() => {
-              // this.renderSentimentTimeline();
+              this.renderSentimentTimeline();
             });
           }
           
@@ -1102,7 +1084,7 @@ export default {
             this.sentimentSummary = this.sentimentResult.summary || {};
             
             this.$nextTick(() => {
-              // this.renderSentimentTimeline();
+              this.renderSentimentTimeline();
             });
           })
           .catch(error => {
@@ -1198,52 +1180,6 @@ export default {
     toggleShowAllEpisodes() {
       this.showAllEpisodes = !this.showAllEpisodes;
     },
-    processedTopUsers() {
-      if (!this.userSummary || !this.userSummary.top_users || !Array.isArray(this.userSummary.top_users)) {
-        return [];
-      }
-      
-      return this.userSummary.top_users.map((item, index) => {
-        if (!item) return { row: index, user_hash: '未知', count: 0 };
-        return { ...item, row: index };
-      });
-    },
-    processedKeywords() {
-      if (!this.keywordResult || !Array.isArray(this.keywordResult)) {
-        return [];
-      }
-      
-      return this.keywordResult.map((item, index) => {
-        if (!item) return { row: index, keyword: '未知', frequency: 0, weight: 0 };
-        return { ...item, row: index };
-      });
-    },
-    getHeatColor(count) {
-        // 热力图颜色范围从蓝色(少)到红色(多)
-        if (count <= 0) return 'rgba(220, 220, 220, 0.5)'; // 灰色，无弹幕
-        
-        // 颜色阈值
-        const thresholds = [
-            { count: 1, color: 'rgba(0, 128, 255, 0.6)' },    // 蓝色
-            { count: 5, color: 'rgba(0, 200, 255, 0.7)' },    // 浅蓝色
-            { count: 10, color: 'rgba(0, 255, 200, 0.7)' },   // 青色
-            { count: 20, color: 'rgba(0, 255, 0, 0.7)' },     // 绿色
-            { count: 50, color: 'rgba(255, 255, 0, 0.7)' },   // 黄色
-            { count: 100, color: 'rgba(255, 128, 0, 0.8)' },  // 橙色
-            { count: 200, color: 'rgba(255, 0, 0, 0.8)' },    // 红色
-            { count: 500, color: 'rgba(255, 0, 128, 0.9)' },  // 紫红色
-        ];
-        
-        // 找到适合的颜色
-        for (const threshold of thresholds) {
-            if (count < threshold.count) {
-                return threshold.color;
-            }
-        }
-        
-        // 如果超过最高阈值，返回最高级别的颜色
-        return 'rgba(255, 0, 255, 0.9)'; // 紫色，非常多的弹幕
-    },
     logTimelineDataToConsole() {
       console.log('时间线数据:', this.timelineSummary);
       console.log('时间线项目:', this.timelineItems);
@@ -1271,11 +1207,11 @@ export default {
       }
     },
     formatCustomTimestamp(timestamp, scale) {
-      // 根据不同的scale.unit选择不同的时间格式
-      if (scale.unit === 'minutes') {
+      // 根据不同的scale选择不同的时间格式
+      if (scale && scale.unit === 'minutes') {
         // 分钟级别的时间戳
         return this.formatDuration(timestamp);
-      } else if (scale.unit === 'seconds') {
+      } else if (scale && scale.unit === 'seconds') {
         // 秒级别的时间戳，只显示分:秒
         const totalSeconds = Math.floor(timestamp / 1000);
         const minutes = Math.floor(totalSeconds / 60);
@@ -1369,6 +1305,78 @@ export default {
           }
         }
       });
+    },
+    renderSentimentTimeline() {
+      console.log('准备情感时间线数据');
+      // 该方法在数据加载后调用
+      // 由于我们使用了计算属性 formattedSentimentData 和 LineChart 组件
+      // 大部分处理逻辑已经在计算属性中实现，此方法主要用于调试和添加额外功能
+      
+      if (!this.sentimentResult || !Array.isArray(this.sentimentResult.segments)) {
+        console.warn('没有可用的情感片段数据');
+        return;
+      }
+      
+      console.log(`找到 ${this.sentimentResult.segments.length} 个情感分析片段`);
+      
+      // 这里可以添加额外的数据处理或调试信息
+      if (this.formattedSentimentData.length > 0) {
+        console.log('情感时间线数据准备完成');
+      }
+    },
+    getSentimentPointColor(point) {
+      // 根据情感类型返回不同颜色
+      if (!point || !point.sentiment) return '#909399'; // 默认灰色
+      
+      if (point.sentiment === 'positive') {
+        return '#67c23a'; // 绿色 - 积极情感
+      } else if (point.sentiment === 'negative') {
+        return '#f56c6c'; // 红色 - 消极情感
+      } else {
+        return '#909399'; // 灰色 - 中性情感
+      }
+    },
+    
+    formatSentimentTooltip(point) {
+      if (!point) return '';
+      
+      const sentimentText = this.getSentimentText(point.sentiment);
+      const time = this.formatDuration(point.start);
+      const score = (point.originalScore || 0).toFixed(2);
+      const danmakuCount = point.danmaku_count || 0;
+      
+      return `<div style="padding: 5px;">
+        <div>时间: ${time}</div>
+        <div>情感: <span style="color: ${this.getSentimentPointColor(point)}">${sentimentText}</span></div>
+        <div>得分: ${score}</div>
+        <div>弹幕数: ${danmakuCount}</div>
+      </div>`;
+    },
+    getHeatColor(count) {
+      // 热力图颜色范围从蓝色(少)到红色(多)
+      if (count <= 0) return 'rgba(220, 220, 220, 0.5)'; // 灰色，无弹幕
+      
+      // 颜色阈值
+      const thresholds = [
+        { count: 1, color: 'rgba(0, 128, 255, 0.6)' },    // 蓝色
+        { count: 5, color: 'rgba(0, 200, 255, 0.7)' },    // 浅蓝色
+        { count: 10, color: 'rgba(0, 255, 200, 0.7)' },   // 青色
+        { count: 20, color: 'rgba(0, 255, 0, 0.7)' },     // 绿色
+        { count: 50, color: 'rgba(255, 255, 0, 0.7)' },   // 黄色
+        { count: 100, color: 'rgba(255, 128, 0, 0.8)' },  // 橙色
+        { count: 200, color: 'rgba(255, 0, 0, 0.8)' },    // 红色
+        { count: 500, color: 'rgba(255, 0, 128, 0.9)' },  // 紫红色
+      ];
+      
+      // 找到适合的颜色
+      for (const threshold of thresholds) {
+        if (count < threshold.count) {
+          return threshold.color;
+        }
+      }
+      
+      // 如果超过最高阈值，返回最高级别的颜色
+      return 'rgba(255, 0, 255, 0.9)'; // 紫色，非常多的弹幕
     }
   },
   computed: {
@@ -1583,6 +1591,36 @@ export default {
         start: item.time * 1000, // 转换为毫秒
         value: item.count || 0
       }));
+    },
+    formattedSentimentData() {
+      if (!this.sentimentResult || !Array.isArray(this.sentimentResult.segments)) {
+        return [];
+      }
+      
+      // 将情感得分映射到数值，用于绘制图表
+      return this.sentimentResult.segments.map(segment => {
+        // 情感得分值根据情感类型映射为标准化值
+        // positive: 0.5-1.0, neutral: 0.4-0.6, negative: 0-0.5
+        let scoreValue = segment.score;
+        if (segment.sentiment === 'positive') {
+          // 确保正面情感得分在0.5-1.0范围
+          scoreValue = 0.5 + (Math.abs(segment.score) * 0.5);
+        } else if (segment.sentiment === 'negative') {
+          // 确保负面情感得分在0-0.5范围
+          scoreValue = 0.5 - (Math.abs(segment.score) * 0.5);
+        } else {
+          // 中性情感在0.4-0.6范围
+          scoreValue = 0.5 + (segment.score * 0.1);
+        }
+        
+        return {
+          start: segment.segment_start,
+          value: scoreValue, // 使用映射后的得分值
+          sentiment: segment.sentiment,
+          originalScore: segment.score,
+          danmaku_count: segment.danmaku_count || 0
+        };
+      });
     }
   },
   beforeDestroy() {
@@ -1652,11 +1690,18 @@ export default {
   gap: 20px;
 }
 
-.word-cloud-container, .sentiment-timeline, .timeline-chart, .user-distribution-chart {
+.word-cloud-container, .timeline-chart, .user-distribution-chart {
   height: 400px;
   border: 1px solid #ebeef5;
   border-radius: 4px;
   padding: 20px;
+  background-color: #f8f9fa;
+}
+
+.sentiment-timeline {
+  height: 400px;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
   background-color: #f8f9fa;
 }
 
@@ -1737,20 +1782,20 @@ export default {
 .overall-timeline-chart {
   width: 100%;
   height: 400px;
-   border: 1px solid #ebeef5;
-   border-radius: 4px;
-   padding: 10px;
-   background-color: #fff;
-   cursor: pointer;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  padding: 10px;
+  background-color: #fff;
+  cursor: pointer;
 }
 
 .timeline-chart {
   width: 100%;
   height: 400px;
-   border: 1px solid #ebeef5;
-   border-radius: 4px;
-   padding: 10px;
-   background-color: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  padding: 10px;
+  background-color: #fff;
 }
 
 .chart-help-text {
@@ -1830,18 +1875,15 @@ export default {
   margin-top: 8px;
 }
 
-/* 为 vue-timeline-chart 添加一些基本样式 */
 .vue-timeline-chart {
   font-family: Avenir, Helvetica, Arial, sans-serif;
 }
 
-/* 覆盖一些默认样式或添加自定义样式 (如果需要) */
 .vue-timeline-chart .marker .label {
   font-size: 10px;
   color: #333;
 }
 
-/* 处理无数据消息 */
 .no-data-message {
   margin: 20px 0;
 }
@@ -1872,44 +1914,17 @@ export default {
   margin-bottom: 10px;
 }
 
+.debug-info h5 {
+  margin-top: 10px;
+  margin-bottom: 5px;
+}
+
 .debug-info p {
   margin: 5px 0;
 }
 
 .debug-info .el-button {
   margin-top: 10px;
-}
-
-.timeline-container {
-  margin-top: 20px;
-}
-
-.episode-navigation {
-  margin-bottom: 15px;
-  display: flex;
-  justify-content: center;
-}
-
-.chart-info {
-  margin-top: 15px;
-  text-align: center;
-  color: #606266;
-  font-size: 14px;
-}
-
-/* 确保折线图在组件中正确显示 */
-:deep(.vue-timeline-chart .group-items) {
-  overflow: visible !important;
-}
-
-:deep(.vue-timeline-chart) {
-  --marker-label-color: #333;
-  --timestamp-label-color: #333;
-}
-
-.debug-info h5 {
-  margin-top: 10px;
-  margin-bottom: 5px;
 }
 
 .debug-row {
@@ -1936,38 +1951,31 @@ export default {
   flex-wrap: wrap;
 }
 
-/* 增强时间线和折线图显示效果 */
-.timeline-chart-container {
-  --group-items-height: 450px !important; /* 增加高度 */
-  --group-header-height: 40px;
-  --navigation-height: 50px;
-  margin: 0 !important;
-  padding: 0 !important;
-  background-color: transparent !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  max-height: 550px !important;
+.timeline-container {
+  margin-top: 20px;
 }
 
-/* 添加分P切换组 */
 .episode-navigation {
   margin: 10px 0;
   text-align: center;
 }
 
-/* 确保卡片内容溢出控制 */
 .el-card__body {
   height: calc(100% - 60px);
   overflow-y: auto;
 }
 
-/* 修复no-data-message样式 */
 .no-data-message {
   margin: 20px auto;
   max-width: 90%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #909399;
+  font-size: 14px;
 }
 
-/* 添加返回顶部按钮 */
 .return-to-top {
   position: fixed;
   bottom: 20px;
@@ -2000,49 +2008,6 @@ export default {
   padding: 10px;
 }
 
-.vue-timeline-chart :deep(.group) {
-  height: 60px;
-}
-
-.vue-timeline-chart :deep(.group-label) {
-  font-size: 14px;
-  font-weight: bold;
-}
-
-.vue-timeline-chart :deep(.group-item) {
-  height: 35px;
-  transition: transform 0.2s, opacity 0.2s;
-}
-
-.vue-timeline-chart :deep(.group-item:hover) {
-  transform: scale(1.05);
-  opacity: 0.9;
-}
-
-.vue-timeline-chart :deep(.marker) {
-  opacity: 0.7;
-  transition: opacity 0.2s, transform 0.2s;
-}
-
-.vue-timeline-chart :deep(.marker:hover) {
-  opacity: 1;
-  transform: scale(1.1);
-}
-
-.vue-timeline-chart :deep(.timestamp) {
-  font-weight: normal;
-  font-size: 12px;
-}
-
-.no-data-message {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-  color: #909399;
-  font-size: 14px;
-}
-
 .line-chart-wrapper {
   width: 100%;
   height: 280px;
@@ -2069,6 +2034,13 @@ export default {
   display: flex;
   align-items: center;
   margin-bottom: 10px;
+}
+
+.chart-info {
+  margin-top: 15px;
+  text-align: center;
+  color: #606266;
+  font-size: 14px;
 }
 
 .peak-tag {
@@ -2113,5 +2085,61 @@ export default {
 
 .view-controls .el-button {
   margin-left: 10px;
+}
+
+.timeline-chart-container { 
+  margin: 0 !important; 
+  padding: 0 !important; 
+  background-color: transparent !important; 
+  border-radius: 0 !important; 
+  box-shadow: none !important; 
+  max-height: 550px !important; 
+}
+
+/* 深度选择器样式 */
+:deep(.vue-timeline-chart .group) { 
+  height: 60px; 
+}
+
+:deep(.vue-timeline-chart .group-label) { 
+  font-size: 14px; 
+  font-weight: bold; 
+}
+
+:deep(.vue-timeline-chart .group-item) { 
+  height: 35px; 
+  transition: transform 0.2s, opacity 0.2s; 
+}
+
+:deep(.vue-timeline-chart .group-item:hover) { 
+  transform: scale(1.05); 
+  opacity: 0.9; 
+}
+
+:deep(.vue-timeline-chart .marker) { 
+  opacity: 0.7; 
+  transition: opacity 0.2s, transform 0.2s; 
+}
+
+:deep(.vue-timeline-chart .marker:hover) { 
+  opacity: 1; 
+  transform: scale(1.1); 
+}
+
+:deep(.vue-timeline-chart .timestamp) { 
+  font-weight: normal; 
+  font-size: 12px; 
+}
+
+:deep(.vue-timeline-chart .group-items) { 
+  overflow: visible !important; 
+}
+
+:deep(.vue-timeline-chart) { 
+  --marker-label-color: #333; 
+  --timestamp-label-color: #333; 
+  --group-items-height: 450px !important; 
+  --group-header-height: 40px;
+  --navigation-height: 50px;
 }
 </style> 

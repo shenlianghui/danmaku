@@ -13,6 +13,7 @@ class Video(models.Model):
     duration = models.IntegerField(default=0, verbose_name="视频时长(秒)")
     last_crawled = models.DateTimeField(null=True, blank=True, verbose_name="上次爬取时间")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='videos', null=True, blank=True, verbose_name="爬取用户")
+    danmaku_count = models.IntegerField(default=0, verbose_name="爬取弹幕数")
     
     class Meta:
         verbose_name = "视频信息"

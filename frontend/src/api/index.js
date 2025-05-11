@@ -126,16 +126,6 @@ export const videoApi = {
     return api.get(`/videos/${id}/danmakus/`, { params: queryParams });
   },
   
-  // 爬取视频弹幕
-  crawlVideoDanmakus(id) {
-    return api.post(`/videos/${id}/crawl/`);
-  },
-  
-  // 获取当前用户的视频列表
-  getMyVideos(params) {
-    const queryParams = { ...params, user: 'current' };
-    return api.get('/videos/my_videos/', { params: queryParams });
-  },
   
   // 获取当前用户的任务列表
   getMyTasks(params) {
@@ -208,9 +198,9 @@ export const analysisApi = {
     
     console.log('发送分析请求:', data);
     
-    // 为情感分析设置更长的超时时间
+    // 为情感分析和全面分析设置更长的超时时间
     const requestConfig = {
-      timeout: type === 'sentiment' ? 180000 : 60000 // 情感分析3分钟，其他1分钟
+      timeout: (type === 'sentiment' || type === 'all') ? 300000 : 60000 // 情感分析和全面分析5分钟，其他1分钟
     };
     
     return api.post('/analyses/analyze/', data, requestConfig)
@@ -226,16 +216,6 @@ export const analysisApi = {
         }
         return Promise.reject(error);
       });
-  },
-  
-  // 获取关键词列表
-  getKeywords(videoId) {
-    return api.get('/keywords/', { params: { bvid: videoId } });
-  },
-  
-  // 获取情感分析结果
-  getSentiments(videoId) {
-    return api.get('/sentiments/', { params: { bvid: videoId } });
   }
 };
 

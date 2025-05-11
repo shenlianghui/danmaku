@@ -15,7 +15,7 @@ import os
 import collections
 
 from danmaku_crawler.models import Video, Danmaku
-from .models import DanmakuAnalysis, KeywordExtraction, SentimentAnalysis
+from .models import DanmakuAnalysis
 # 导入BERT情感分析器
 from .bert_sentiment import bert_analyzer
 from . import analyzer_config
@@ -121,21 +121,6 @@ class DanmakuAnalyzer:
         keywords = [{'keyword': word, 'frequency': count, 'weight': count/total_words} 
                    for word, count in word_counts.most_common(top_n)]
         
-        # 保存到数据库
-        with transaction.atomic():
-            # 先删除该视频的旧关键词
-            KeywordExtraction.objects.filter(video=self.video).delete()
-            
-            # 批量创建新关键词
-            KeywordExtraction.objects.bulk_create([
-                KeywordExtraction(
-                    video=self.video,
-                    keyword=item['keyword'],
-                    frequency=item['frequency'],
-                    weight=item['weight']
-                ) for item in keywords
-            ])
-        
         # 保存分析结果
         DanmakuAnalysis.objects.update_or_create(
             video=self.video,
@@ -167,7 +152,8 @@ class DanmakuAnalyzer:
                 'sentiment_counts': {'positive': 0, 'neutral': 0, 'negative': 0},
                 'sentiment_score': 0,
                 'used_bert': False,
-                'processing_time_ms': 0
+                'processing_time_ms': 0,
+                'segments': []  # 添加空的segments数组
             }
         
         # 提取弹幕文本
@@ -213,10 +199,13 @@ class DanmakuAnalyzer:
         auto_downgrade = False
         
         # 超大数据量自动降级判断
-        if use_bert and len(processed_texts) > analyzer_config.SENTIMENT_ANALYSIS.get('auto_downgrade_threshold', 10000):
+        if use_bert and len(processed_texts) > analyzer_config.SENTIMENT_ANALYSIS.get('auto_downgrade_threshold', 100000):
             logger.warning(f"弹幕数量过多({len(processed_texts)}条)，自动降级为简单词汇分析")
             auto_downgrade = True
             use_bert = False
+        
+        # 存储每条弹幕的情感结果
+        danmaku_sentiments = []
         
         # 如果需要使用BERT模型并且没有自动降级
         if use_bert and not auto_downgrade:
@@ -238,23 +227,68 @@ class DanmakuAnalyzer:
                         max_processing_time=max_processing_time
                     )
                     
-                    for result in sentiment_results:
+                    # 保存每条弹幕的情感和分数
+                    for i, result in enumerate(sentiment_results):
                         sentiment_counts[result] += 1
+                        # 保存情感结果和对应弹幕
+                        if i < len(self.danmakus):
+                            # 获取情感分数
+                            score = 0.5  # 默认中性分数
+                            if result == 'positive':
+                                score = 0.75  # 积极情感分数
+                            elif result == 'negative':
+                                score = 0.25  # 消极情感分数
+                                
+                            danmaku_sentiments.append({
+                                'danmaku': self.danmakus[i],
+                                'sentiment': result,
+                                'score': score
+                            })
                     
                     used_bert = True
                     logger.info("BERT情感分析完成")
                 else:
                     logger.warning("BERT模型未加载，回退到简单词汇情感分析")
                     # 使用简单的词汇情感分析
-                    for text in processed_texts:
+                    for i, text in enumerate(processed_texts):
                         sentiment = self._analyze_simple_sentiment(text)
                         sentiment_counts[sentiment] += 1
+                        
+                        # 保存情感结果和对应弹幕
+                        if i < len(self.danmakus):
+                            # 获取情感分数
+                            score = 0.5  # 默认中性分数
+                            if sentiment == 'positive':
+                                score = 0.75  # 积极情感分数
+                            elif sentiment == 'negative':
+                                score = 0.25  # 消极情感分数
+                                
+                            danmaku_sentiments.append({
+                                'danmaku': self.danmakus[i],
+                                'sentiment': sentiment,
+                                'score': score
+                            })
             except Exception as e:
                 # BERT分析失败，回退到简单分析
                 logger.error(f"BERT情感分析失败: {str(e)}")
-                for text in processed_texts:
+                for i, text in enumerate(processed_texts):
                     sentiment = self._analyze_simple_sentiment(text)
                     sentiment_counts[sentiment] += 1
+                    
+                    # 保存情感结果和对应弹幕
+                    if i < len(self.danmakus):
+                        # 获取情感分数
+                        score = 0.5  # 默认中性分数
+                        if sentiment == 'positive':
+                            score = 0.75  # 积极情感分数
+                        elif sentiment == 'negative':
+                            score = 0.25  # 消极情感分数
+                            
+                        danmaku_sentiments.append({
+                            'danmaku': self.danmakus[i],
+                            'sentiment': sentiment,
+                            'score': score
+                        })
         else:
             # 使用简单的词汇情感分析
             logger.info(f"使用简单词汇表进行情感分析，共{len(processed_texts)}条弹幕")
@@ -264,32 +298,89 @@ class DanmakuAnalyzer:
                 logger.info("使用并行处理来加速简单情感分析")
                 try:
                     import concurrent.futures
+                    
+                    # 定义处理函数，返回情感和索引
+                    def process_text(args):
+                        idx, text = args
+                        sentiment = self._analyze_simple_sentiment(text)
+                        return idx, sentiment
+                    
                     with concurrent.futures.ThreadPoolExecutor(max_workers=min(32, os.cpu_count() or 4)) as executor:
                         # 按批次处理，每批500条
                         batch_size = 500
+                        all_results = []
+                        
                         for i in range(0, len(processed_texts), batch_size):
                             batch_texts = processed_texts[i:i+batch_size]
-                            # 提交任务给线程池
-                            futures = [executor.submit(self._analyze_simple_sentiment, text) for text in batch_texts]
+                            # 提交任务给线程池，保留索引
+                            futures = [executor.submit(process_text, (i+j, text)) for j, text in enumerate(batch_texts)]
                             # 收集结果
                             for future in concurrent.futures.as_completed(futures):
                                 try:
-                                    sentiment = future.result()
+                                    idx, sentiment = future.result()
                                     sentiment_counts[sentiment] += 1
+                                    all_results.append((idx, sentiment))
                                 except Exception as exc:
                                     logger.error(f"线程池处理失败: {str(exc)}")
                                     sentiment_counts['neutral'] += 1  # 错误时默认中性
+                        
+                        # 排序并填充danmaku_sentiments
+                        all_results.sort(key=lambda x: x[0])  # 按索引排序
+                        for idx, sentiment in all_results:
+                            if idx < len(self.danmakus):
+                                # 获取情感分数
+                                score = 0.5  # 默认中性分数
+                                if sentiment == 'positive':
+                                    score = 0.75  # 积极情感分数
+                                elif sentiment == 'negative':
+                                    score = 0.25  # 消极情感分数
+                                    
+                                danmaku_sentiments.append({
+                                    'danmaku': self.danmakus[idx],
+                                    'sentiment': sentiment,
+                                    'score': score
+                                })
                 except Exception as e:
                     logger.error(f"并行处理情感分析失败: {str(e)}，回退到顺序处理")
                     # 回退到顺序处理
-                    for text in processed_texts:
+                    for i, text in enumerate(processed_texts):
                         sentiment = self._analyze_simple_sentiment(text)
                         sentiment_counts[sentiment] += 1
+                        
+                        # 保存情感结果和对应弹幕
+                        if i < len(self.danmakus):
+                            # 获取情感分数
+                            score = 0.5  # 默认中性分数
+                            if sentiment == 'positive':
+                                score = 0.75  # 积极情感分数
+                            elif sentiment == 'negative':
+                                score = 0.25  # 消极情感分数
+                                
+                            danmaku_sentiments.append({
+                                'danmaku': self.danmakus[i],
+                                'sentiment': sentiment,
+                                'score': score
+                            })
             else:
                 # 少量文本直接顺序处理
-                for text in processed_texts:
+                for i, text in enumerate(processed_texts):
                     sentiment = self._analyze_simple_sentiment(text)
                     sentiment_counts[sentiment] += 1
+                    
+                    # 保存情感结果和对应弹幕
+                    if i < len(self.danmakus):
+                        # 获取情感分数
+                        score = 0.5  # 默认中性分数
+                        if sentiment == 'positive':
+                            score = 0.75  # 积极情感分数
+                        elif sentiment == 'negative':
+                            score = 0.25  # 消极情感分数
+                            
+                        danmaku_sentiments.append({
+                            'danmaku': self.danmakus[i],
+                            'sentiment': sentiment,
+                            'score': score
+                        })
         
         # 计算总体情感得分 (-1到1之间)
         total = sum(sentiment_counts.values())
@@ -305,6 +396,9 @@ class DanmakuAnalyzer:
         processing_time = time.time() - start_time
         processing_time_ms = int(processing_time * 1000)
         
+        # 按时间段划分情感分析结果
+        segments = self._generate_sentiment_segments(danmaku_sentiments)
+        
         # 保存分析结果到数据库
         result = {
             'message': '情感分析完成',
@@ -316,7 +410,8 @@ class DanmakuAnalyzer:
             'original_size': original_count,
             'visualization': visualization_data,
             'processing_time_ms': processing_time_ms,
-            'auto_downgraded': auto_downgrade
+            'auto_downgraded': auto_downgrade,
+            'segments': segments  # 添加分段情感结果
         }
         
         # 保存分析结果
@@ -326,21 +421,113 @@ class DanmakuAnalyzer:
             defaults={'result_json': result}
         )
         
-        # # 保存详细的情感分析记录 (此部分代码尝试写入的字段与 SentimentAnalysis 模型不符，且整体结果已保存在 DanmakuAnalysis 中，故注释掉)
-        # sentiment_status = 'positive' if sentiment_score > 0.1 else ('negative' if sentiment_score < -0.1 else 'neutral')
-        # SentimentAnalysis.objects.update_or_create(
-        #     video=self.video,
-        #     defaults={
-        #         'positive_count': sentiment_counts['positive'],
-        #         'neutral_count': sentiment_counts['neutral'],
-        #         'negative_count': sentiment_counts['negative'],
-        #         'sentiment_score': sentiment_score,
-        #         'sentiment_status': sentiment_status,
-        #         'used_bert': used_bert
-        #     }
-        # )
-        
         return result
+    
+    def _generate_sentiment_segments(self, danmaku_sentiments):
+        """按时间生成情感分析段落
+        
+        将弹幕按时间间隔分组，生成每个时间段的情感分析结果
+        
+        Args:
+            danmaku_sentiments: 包含情感分析结果的弹幕列表
+            
+        Returns:
+            时间段列表，每个段落包含开始时间、结束时间、情感和分数
+        """
+        if not danmaku_sentiments:
+            return []
+        
+        # 获取配置中的时间段长度，默认30秒
+        segment_duration = analyzer_config.SENTIMENT_ANALYSIS.get('segment_duration_seconds', 30) * 1000  # 转换为毫秒
+        
+        # 首先按页和进度排序弹幕
+        sorted_danmakus = sorted(
+            danmaku_sentiments,
+            key=lambda x: (x['danmaku'].page_id, x['danmaku'].progress)
+        )
+        
+        # 获取分P边界信息
+        page_start_times = {}
+        current_start_time = 0
+        for page in self.page_info:
+            page_id = page.get('page_id')
+            duration = page.get('duration', 0)
+            page_start_times[page_id] = current_start_time * 1000  # 转换为毫秒
+            current_start_time += duration
+        
+        # 按照分段时长分组弹幕
+        segments = []
+        current_segment = None
+        
+        for item in sorted_danmakus:
+            danmaku = item['danmaku']
+            sentiment = item['sentiment']
+            score = item['score']
+            
+            if danmaku.progress is None or danmaku.page_id is None:
+                continue
+            
+            # 计算绝对时间（毫秒）
+            absolute_time = page_start_times.get(danmaku.page_id, 0) + danmaku.progress
+            
+            # 确定当前弹幕所属的时间段
+            segment_start = (absolute_time // segment_duration) * segment_duration
+            segment_end = segment_start + segment_duration
+            
+            # 如果是新的时间段，创建新的段落
+            if current_segment is None or current_segment['segment_start'] != segment_start:
+                # 如果存在上一个段落，先计算其平均情感并添加
+                if current_segment:
+                    self._finalize_sentiment_segment(current_segment)
+                    segments.append(current_segment)
+                
+                # 创建新的时间段
+                current_segment = {
+                    'segment_start': segment_start,
+                    'segment_end': segment_end,
+                    'positive_count': 0,
+                    'neutral_count': 0,
+                    'negative_count': 0,
+                    'total_score': 0,
+                    'danmaku_count': 0
+                }
+            
+            # 添加当前弹幕到段落统计
+            current_segment['danmaku_count'] += 1
+            current_segment[f'{sentiment}_count'] += 1
+            current_segment['total_score'] += score
+        
+        # 处理最后一个段落
+        if current_segment:
+            self._finalize_sentiment_segment(current_segment)
+            segments.append(current_segment)
+        
+        return segments
+    
+    def _finalize_sentiment_segment(self, segment):
+        """完成情感分析段落计算
+        
+        计算段落的情感类型和平均分数
+        
+        Args:
+            segment: 需要完成计算的情感段落
+        """
+        # 计算段落平均分数
+        if segment['danmaku_count'] > 0:
+            segment['score'] = segment['total_score'] / segment['danmaku_count']
+        else:
+            segment['score'] = 0.5  # 默认中性
+        
+        # 确定主导情感
+        if segment['positive_count'] > segment['negative_count'] and segment['positive_count'] > segment['neutral_count']:
+            segment['sentiment'] = 'positive'
+        elif segment['negative_count'] > segment['positive_count'] and segment['negative_count'] > segment['neutral_count']:
+            segment['sentiment'] = 'negative'
+        else:
+            segment['sentiment'] = 'neutral'
+        
+        # 移除中间计算数据
+        segment.pop('total_score', None)
     
     def _generate_sentiment_visualization(self, sentiment_counts, sentiment_score):
         """生成情感分析结果的可视化数据
@@ -590,7 +777,7 @@ class DanmakuAnalyzer:
         # 保存分析结果
         DanmakuAnalysis.objects.update_or_create(
             video=self.video,
-            analysis_type='user_activity',
+            analysis_type='user',
             defaults={'result_json': result}
         )
         
@@ -640,7 +827,7 @@ class DanmakuAnalyzer:
                 'video': {
                     'bvid': self.video.bvid,
                     'title': self.video.title,
-                    'author': self.video.author,
+                    'author': self.video.owner,
                     'duration': self.video.duration,
                     'danmaku_count': len(self.danmakus)
                 },
@@ -723,7 +910,7 @@ def analyze_video_danmaku(video_bvid, analysis_type=None, use_bert=True, batch_s
             )
         elif analysis_type == 'timeline':
             result = analyzer.analyze_timeline()
-        elif analysis_type == 'user_activity':
+        elif analysis_type == 'user':
             result = analyzer.analyze_user_activity()
         else:
             # 运行所有分析

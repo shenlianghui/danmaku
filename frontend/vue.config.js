@@ -12,10 +12,11 @@ module.exports = defineConfig({
     port: 8080, // 前端开发服务器端口
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',  // 后端服务器地址
-        changeOrigin: true,               // 开启代理
-        secure: false,                    // 使用 http
-        logLevel: 'debug'                 // 调试级别日志
+        target: process.env.VUE_APP_API_BASE_URL || 'http://localhost:8000',
+        changeOrigin: true,
+        pathRewrite: {
+          '^/api': '/api'
+        }
       }
     },
     client: {
@@ -29,12 +30,19 @@ module.exports = defineConfig({
 
   // 输出设置
   outputDir: 'dist',
-  publicPath: '/',
+  publicPath: process.env.NODE_ENV === 'production' ? './' : '/',
   
   // 增加配置解决 Vue 警告
   configureWebpack: {
     performance: {
       hints: false // 关闭性能提示
-    }
+    },
+    plugins: [
+      // 定义Vue 3特性标志
+      new (require('webpack').DefinePlugin)({
+        '__VUE_PROD_DEVTOOLS__': false,
+        '__VUE_PROD_HYDRATION_MISMATCH_DETAILS__': false
+      })
+    ]
   }
 }) 

@@ -2,8 +2,6 @@ from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.http import JsonResponse
-import json
 import logging
 from django.utils import timezone
 from threading import Thread
@@ -18,82 +16,22 @@ class VideoViewSet(viewsets.ModelViewSet):
     """视频信息视图集"""
     queryset = Video.objects.all().order_by('-created_at')
     serializer_class = VideoSerializer
-    permission_classes = [permissions.AllowAny]  # 允许所有人访问
+    permission_classes = [permissions.AllowAny]
     
     def get_queryset(self):
         """根据用户过滤视频列表"""
         queryset = super().get_queryset()
         
-        # 用户过滤逻辑
-        user_param = self.request.query_params.get('user', None)
-        
-        # 如果用户未登录，只返回空查询集
         if not self.request.user.is_authenticated:
             return Video.objects.none()
             
-        # 如果明确指定获取当前用户视频，或者默认情况下非管理员用户
-        if user_param == 'current' or (user_param != 'all' and not self.request.user.is_staff):
-            queryset = queryset.filter(user=self.request.user)
-        # 只有管理员在明确请求时才能看到所有视频
-        elif user_param == 'all' and not self.request.user.is_staff:
-            # 非管理员请求所有视频时，仍然只返回自己的视频
-            queryset = queryset.filter(user=self.request.user)
-            
-        return queryset
-    
-    @action(detail=True, methods=['post'])
-    def crawl(self, request, pk=None):
-        """触发爬取视频弹幕"""
-        # 检查用户是否登录
-        if not request.user.is_authenticated:
-            return Response({
-                'message': '您需要登录才能执行此操作'
-            }, status=status.HTTP_401_UNAUTHORIZED)
-            
-        video = self.get_object()
+        user_param = self.request.query_params.get('user', None)
+        if user_param == 'all' and self.request.user.is_staff:
+            # 管理员可以查看全部视频
+            return queryset
         
-        # 创建一个任务对象
-        task = CrawlTask.objects.create(
-            video=video,
-            status='pending',
-            started_at=timezone.now(),
-            user=request.user
-        )
-        
-        # 启动后台任务
-        def run_crawler_task():
-            try:
-                # 修改任务状态为运行中
-                task.status = 'running'
-                task.save()
-                
-                # 传递当前用户和任务对象到爬取方法
-                result = crawl_video_danmaku(video.bvid, user=request.user, existing_task=task)
-                
-                # 任务完成后会自动更新状态
-            except Exception as e:
-                logger.exception(f"爬取弹幕异常 - 视频: {video.title}, 异常: {str(e)}")
-                try:
-                    # 更新任务状态为失败
-                    task.refresh_from_db()
-                    if task.status == 'running':
-                        task.status = 'failed'
-                        task.error_message = str(e)
-                        task.completed_at = timezone.now()
-                        task.save()
-                except Exception as inner_e:
-                    logger.error(f"更新任务状态失败: {str(inner_e)}")
-        
-        # 启动爬取线程
-        crawler_thread = Thread(target=run_crawler_task)
-        crawler_thread.daemon = True
-        crawler_thread.start()
-        
-        return Response({
-            'message': f'已开始爬取弹幕 - {video.title}',
-            'task_id': task.id,
-            'status': task.status
-        })
+        # 其他情况只返回当前用户的视频
+        return queryset.filter(user=self.request.user)
     
     @action(detail=True, methods=['get'])
     def danmakus(self, request, pk=None):
@@ -114,63 +52,42 @@ class VideoViewSet(viewsets.ModelViewSet):
         """获取视频的所有爬取任务"""
         video = self.get_object()
         
-        # 获取任务时也要根据用户过滤，只返回当前用户的任务
-        if not request.user.is_staff:  # 非管理员只能看到自己的任务
+        # 非管理员只能看到自己的任务
+        if not request.user.is_staff:
             tasks = CrawlTask.objects.filter(video=video, user=request.user).order_by('-created_at')
         else:
-            # 管理员可以看到所有任务
             tasks = CrawlTask.objects.filter(video=video).order_by('-created_at')
             
         serializer = CrawlTaskSerializer(tasks, many=True)
         return Response(serializer.data)
         
-    @action(detail=False, methods=['get'])
-    def my_videos(self, request):
-        """获取当前用户的所有视频"""
-        # 检查用户是否登录
-        if not request.user.is_authenticated:
-            return Response({
-                'message': '您需要登录才能查看视频'
-            }, status=status.HTTP_401_UNAUTHORIZED)
-            
-        # 明确指定查询当前用户的视频
-        videos = Video.objects.filter(user=request.user).order_by('-created_at')
-        page = self.paginate_queryset(videos)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        
-        serializer = self.get_serializer(videos, many=True)
-        return Response(serializer.data)
+
 
 class DanmakuViewSet(viewsets.ReadOnlyModelViewSet):
     """弹幕数据视图集"""
     queryset = Danmaku.objects.all().order_by('progress')
     serializer_class = DanmakuSerializer
-    permission_classes = [permissions.AllowAny]  # 允许所有人访问
+    permission_classes = [permissions.AllowAny]
     
     def get_queryset(self):
         queryset = super().get_queryset()
+        
+        if not self.request.user.is_authenticated:
+            return Danmaku.objects.none()
         
         # 按视频BV号筛选
         bvid = self.request.query_params.get('bvid', None)
         if bvid:
             video = get_object_or_404(Video, bvid=bvid)
             queryset = queryset.filter(video=video)
-        
+            
         # 用户过滤逻辑
         user_param = self.request.query_params.get('user', None)
-        
-        # 如果用户未登录，只返回空查询集
-        if not self.request.user.is_authenticated:
-            return Danmaku.objects.none()
-            
-        # 如果明确指定获取当前用户弹幕，或者默认情况下非管理员用户
-        if user_param == 'current' or (user_param != 'all' and not self.request.user.is_staff):
-            queryset = queryset.filter(video__user=self.request.user)
-        # 只有管理员在明确请求时才能看到所有弹幕
-        elif user_param == 'all' and not self.request.user.is_staff:
-            # 非管理员请求所有弹幕时，仍然只返回自己视频的弹幕
+        if user_param == 'all' and self.request.user.is_staff:
+            # 管理员请求'all'时返回所有弹幕
+            pass
+        else:
+            # 其他情况只返回用户自己视频的弹幕
             queryset = queryset.filter(video__user=self.request.user)
         
         # 按进度范围筛选
@@ -188,11 +105,14 @@ class CrawlTaskViewSet(viewsets.ReadOnlyModelViewSet):
     """爬取任务视图集"""
     queryset = CrawlTask.objects.all().order_by('-created_at')
     serializer_class = CrawlTaskSerializer
-    permission_classes = [permissions.AllowAny]  # 允许所有人访问
+    permission_classes = [permissions.AllowAny]
     
     def get_queryset(self):
         """根据用户过滤任务列表"""
         queryset = super().get_queryset()
+        
+        if not self.request.user.is_authenticated:
+            return CrawlTask.objects.none()
         
         # 如果请求参数中有视频ID，过滤出该视频的任务
         video_id = self.request.query_params.get('video', None)
@@ -201,25 +121,16 @@ class CrawlTaskViewSet(viewsets.ReadOnlyModelViewSet):
         
         # 用户过滤逻辑
         user_param = self.request.query_params.get('user', None)
+        if user_param == 'all' and self.request.user.is_staff:
+            # 管理员可以查看所有任务
+            return queryset
         
-        # 如果用户未登录，只返回空查询集
-        if not self.request.user.is_authenticated:
-            return CrawlTask.objects.none()
-            
-        # 如果明确指定获取当前用户任务，或者默认情况下非管理员用户
-        if user_param == 'current' or (user_param != 'all' and not self.request.user.is_staff):
-            queryset = queryset.filter(user=self.request.user)
-        # 只有管理员在明确请求时才能看到所有任务
-        elif user_param == 'all' and not self.request.user.is_staff:
-            # 非管理员请求所有任务时，仍然只返回自己的任务
-            queryset = queryset.filter(user=self.request.user)
-            
-        return queryset
+        # 其他用户只能查看自己的任务
+        return queryset.filter(user=self.request.user)
     
     @action(detail=False, methods=['post'])
     def create_task(self, request):
         """创建新的爬取任务"""
-        # 检查用户是否登录
         if not request.user.is_authenticated:
             return Response({
                 'message': '您需要登录才能创建爬取任务'
@@ -234,29 +145,23 @@ class CrawlTaskViewSet(viewsets.ReadOnlyModelViewSet):
                     'message': '请提供视频URL'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # 首先尝试解析BV号，以验证URL格式
+            # 解析BV号
             crawler = BilibiliDanmakuCrawler()
-            bvid = None
-            
-            if video_url.startswith('http'):
-                bvid = crawler.parse_bvid(video_url)
-            else:
-                bvid = video_url
+            bvid = crawler.parse_bvid(video_url) if video_url.startswith('http') else video_url
                 
             if not bvid:
                 return Response({
                     'message': '无法解析BV号，请检查URL格式'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # 先获取视频基本信息，确认视频存在
+            # 获取视频信息
             video_info = crawler.get_video_info(bvid)
             if not video_info:
                 return Response({
-                    'message': f'获取视频信息失败，请检查URL或Cookie是否正确'
+                    'message': '获取视频信息失败，请检查URL或Cookie是否正确'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # 创建视频记录（如果不存在）
-            video_obj = None
+            # 获取或创建视频记录
             try:
                 video_obj = Video.objects.get(bvid=bvid, user=request.user)
                 logger.info(f"视频已存在: {bvid}, 用户: {request.user.username}")
@@ -274,43 +179,38 @@ class CrawlTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 )
                 logger.info(f"创建新视频记录: {video_obj.title}, BV: {bvid}")
             
-            # 创建爬取任务记录
+            # 创建爬取任务
             task = CrawlTask.objects.create(
                 video=video_obj,
-                status='pending',  # 设置为等待状态
+                status='pending',
                 started_at=timezone.now(),
                 user=request.user
             )
             
-            # 启动后台任务
+            # 启动后台爬取任务
             def run_crawler_task():
                 try:
                     logger.info(f"开始后台爬取任务 ID: {task.id}, 视频: {video_obj.title}")
-                    # 修改任务状态为运行中
                     task.status = 'running'
                     task.save()
                     
-                    # 执行爬取
-                    result = crawler.crawl_danmaku(bvid, cookie_str=cookie_str, user=request.user, existing_task=task)
+                    result = crawl_video_danmaku(bvid, cookie_str=cookie_str, user=request.user, existing_task=task)
                     
-                    # 如果原任务对象已经被更新（如爬取完成或失败），不再更新状态
+                    # 更新任务状态
                     task.refresh_from_db()
                     if task.status == 'running':
                         if result:
-                            # 爬取成功，更新状态为已完成
                             task.status = 'completed'
                             task.danmaku_count = result.danmaku_count
-                            task.completed_at = timezone.now()
                         else:
-                            # 爬取失败
                             task.status = 'failed'
                             task.error_message = '爬取过程中出现错误'
-                            task.completed_at = timezone.now()
+                        task.completed_at = timezone.now()
                         task.save()
+                        video_obj.save()
                 except Exception as e:
                     logger.exception(f"后台爬取任务异常 - 任务ID: {task.id}, 异常: {str(e)}")
                     try:
-                        # 更新任务状态为失败
                         task.refresh_from_db()
                         task.status = 'failed'
                         task.error_message = str(e)
@@ -321,10 +221,10 @@ class CrawlTaskViewSet(viewsets.ReadOnlyModelViewSet):
             
             # 启动爬取线程
             crawler_thread = Thread(target=run_crawler_task)
-            crawler_thread.daemon = True  # 设置为守护线程，不阻止主程序退出
+            crawler_thread.daemon = True
             crawler_thread.start()
+
             
-            # 立即返回响应
             return Response({
                 'message': f'已提交爬取任务 - {video_obj.title}',
                 'task_id': task.id,
@@ -332,8 +232,7 @@ class CrawlTaskViewSet(viewsets.ReadOnlyModelViewSet):
             })
             
         except Exception as e:
-            # 记录详细错误信息
-            logger.exception(f"爬取任务创建异常 - 用户: {request.user.username}, URL: {video_url if 'video_url' in locals() else 'unknown'}, 异常: {str(e)}")
+            logger.exception(f"爬取任务创建异常 - 用户: {request.user.username}, 异常: {str(e)}")
             return Response({
                 'message': f'爬取任务创建失败: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -341,7 +240,6 @@ class CrawlTaskViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def my_tasks(self, request):
         """获取当前用户的所有爬取任务"""
-        # 检查用户是否登录
         if not request.user.is_authenticated:
             return Response({
                 'message': '您需要登录才能查看任务'

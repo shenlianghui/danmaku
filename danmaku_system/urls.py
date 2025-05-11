@@ -23,7 +23,7 @@ import os
 from django.conf import settings
 
 from danmaku_crawler.views import VideoViewSet, DanmakuViewSet, CrawlTaskViewSet
-from danmaku_analysis.views import AnalysisViewSet, KeywordViewSet, SentimentViewSet
+from danmaku_analysis.views import AnalysisViewSet
 
 # 创建路由器
 router = DefaultRouter()
@@ -31,8 +31,7 @@ router.register(r'videos', VideoViewSet)
 router.register(r'danmakus', DanmakuViewSet)
 router.register(r'tasks', CrawlTaskViewSet)
 router.register(r'analyses', AnalysisViewSet)
-router.register(r'keywords', KeywordViewSet)
-router.register(r'sentiments', SentimentViewSet)
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),

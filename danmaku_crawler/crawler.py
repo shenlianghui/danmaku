@@ -148,16 +148,16 @@ class BilibiliDanmakuCrawler:
     
     def get_all_danmaku(self, cid, pid, cookie=None, max_pages=None):
         """
-        获取全部弹幕数据
+        获取指定cid的所有弹幕
         
         参数:
-            cid: 视频的cid
-            pid: 视频的aid
-            cookie: Cookie字典
-            max_pages: 最大页数限制
+            cid: 视频分P的cid
+            pid: 视频aid
+            cookie: 用户cookie
+            max_pages: 最大页数，默认全部
             
         返回:
-            list: 所有弹幕数据列表
+            list: 弹幕列表
         """
         all_danmakus = []
         page = 1
@@ -179,6 +179,60 @@ class BilibiliDanmakuCrawler:
             page += 1
         
         return all_danmakus
+    
+    def clean_danmaku(self, danmakus, page_duration):
+        """
+        清洗弹幕数据，过滤无效弹幕
+        
+        参数:
+            danmakus: 原始弹幕列表
+            page_duration: 分P时长（秒）
+            
+        返回:
+            list: 清洗后的弹幕列表
+        """
+        if not danmakus:
+            return []
+            
+        # 转换页面时长为毫秒（弹幕进度单位为毫秒）
+        page_duration_ms = page_duration * 1000 if page_duration else 0
+            
+        cleaned_danmakus = []
+        
+        # 无意义符号模式 - 匹配只包含符号的弹幕
+        meaningless_pattern = re.compile(r'^[\s\.\,\。\，\?\~\-\+\=\*\/\\\(\)\[\]\{\}\<\>\|\'\"\;\:\：\…\r\n]+$')
+        # 过短内容模式 - 匹配长度小于2的内容(排除常见表情和符号)
+        short_pattern = re.compile(r'^.{1,2}$')
+        # 表情符号例外列表 - 这些短字符串是有意义的
+        emoji_exceptions = set(['666', '233', '114', '555', '???', '！！！', '???', '。。。', '???', '6'])
+        
+        logger.info(f"开始清洗弹幕数据: 总数 {len(danmakus)} 条, 视频时长 {page_duration}秒")
+        
+        # 基础清洗 - 去除无效弹幕
+        for d in danmakus:
+            # 1. 过滤progress大于page_duration的弹幕
+            if page_duration_ms > 0 and d.stime > page_duration_ms:
+                logger.debug(f"过滤超时弹幕: {d.text} (进度: {d.stime/1000:.1f}秒, 视频长度: {page_duration}秒)")
+                continue
+                
+            # 2. 过滤无意义符号弹幕
+            if not d.text or len(d.text.strip()) == 0 or meaningless_pattern.match(d.text):
+                logger.debug(f"过滤无意义符号弹幕: '{d.text}'")
+                continue
+                
+            # 3. 过滤过短内容（但保留常见表情符号）
+            if short_pattern.match(d.text) and d.text not in emoji_exceptions:
+                logger.debug(f"过滤过短弹幕: '{d.text}'")
+                continue
+                
+            # 保留有效弹幕
+            cleaned_danmakus.append(d)
+        
+        total_filtered = len(danmakus) - len(cleaned_danmakus)
+        filter_rate = (total_filtered / len(danmakus) * 100) if danmakus else 0
+        
+        logger.info(f"弹幕清洗完成: 原始 {len(danmakus)} 条，清洗后 {len(cleaned_danmakus)} 条，过滤 {total_filtered} 条 ({filter_rate:.2f}%)")
+        return cleaned_danmakus
     
     def parse_danmaku(self, danmakus, video_obj, page_num=1, page_duration=0):
         """
@@ -341,8 +395,14 @@ class BilibiliDanmakuCrawler:
                     logger.info(f"第 {index} 集没有弹幕数据")
                     continue
                 
-                # 解析并保存弹幕
-                count = self.parse_danmaku(danmakus, video_obj, index, page_duration) # 传递分P信息
+                # 清洗弹幕数据
+                cleaned_danmakus = self.clean_danmaku(danmakus, page_duration)
+                if not cleaned_danmakus:
+                    logger.info(f"第 {index} 集清洗后没有有效弹幕数据")
+                    continue
+                
+                # 解析并保存清洗后的弹幕
+                count = self.parse_danmaku(cleaned_danmakus, video_obj, index, page_duration)
                 total_count += count
                 
                 logger.info(f"第 {index} 集弹幕保存完成，共 {count} 条")
@@ -353,6 +413,9 @@ class BilibiliDanmakuCrawler:
             task.danmaku_count = total_count
             task.completed_at = timezone.now()
             task.save()
+
+            video_obj.danmaku_count = total_count
+            video_obj.save()
             
             logger.info(f"爬取完成: {video_obj.title}, 共{total_count}条弹幕")
             return task

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import DanmakuAnalysis, KeywordExtraction, SentimentAnalysis
+from .models import DanmakuAnalysis
 from danmaku_crawler.serializers import VideoSerializer
 
 class AnalysisSerializer(serializers.ModelSerializer):
@@ -19,29 +19,4 @@ class AnalysisSerializer(serializers.ModelSerializer):
     def get_video_bvid(self, obj):
         return obj.video.bvid if obj.video else None
 
-class KeywordSerializer(serializers.ModelSerializer):
-    """关键词提取结果序列化器"""
-    video_title = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = KeywordExtraction
-        fields = ['id', 'video', 'video_title', 'keyword', 'weight', 'frequency', 'created_at']
-    
-    def get_video_title(self, obj):
-        return obj.video.title
 
-class SentimentSerializer(serializers.ModelSerializer):
-    """情感分析结果序列化器"""
-    video_title = serializers.SerializerMethodField()
-    sentiment_display = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = SentimentAnalysis
-        fields = ['id', 'video', 'video_title', 'segment_start', 'segment_end', 
-                  'sentiment', 'sentiment_display', 'score', 'danmaku_count', 'created_at']
-    
-    def get_video_title(self, obj):
-        return obj.video.title
-    
-    def get_sentiment_display(self, obj):
-        return obj.get_sentiment_display() 

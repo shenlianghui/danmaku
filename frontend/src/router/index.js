@@ -122,9 +122,10 @@ const router = createRouter({
 
 console.log('Router created - Step 4');
 
-// 简化的路由守卫 - 检查是否能正常执行
+// 路由守卫 - 添加认证检查
 router.beforeEach((to, from, next) => {
-  console.log('BASIC Router Guard executed for:', to.path);
+  console.log('Router Guard executed for:', to.path);
+  const authStore = useAuthStore();
   
   // 特殊处理分析详情页路由，检查bvid参数
   if (to.name === 'AnalysisView') {
@@ -136,15 +137,22 @@ router.beforeEach((to, from, next) => {
       return;
     }
   }
+
+  // 验证用户权限
+  if (to.meta.requiresAuth) {
+    console.log('访问受保护路由:', to.path, '认证状态:', authStore.isAuthenticated);
+    
+    // 如果用户未认证但尝试访问需要认证的页面
+    if (!authStore.isAuthenticated) {
+      console.log('用户未认证，重定向到登录页');
+      next({ name: 'Login' });
+      return;
+    }
+  }
   
   next();
 })
 
-// 再添加一个单独的简单函数，测试是否被执行
-function testRouterFunction() {
-  console.log('Test router function executed');
-}
-testRouterFunction();
 
 // 保留原始的 getCookie 函数
 function getCookie(name) {

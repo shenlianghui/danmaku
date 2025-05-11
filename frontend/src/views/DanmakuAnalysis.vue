@@ -34,15 +34,23 @@
         
         <el-form-item label="分析类型">
           <el-radio-group v-model="form.analysisType">
-            <el-radio label="keyword">关键词分析</el-radio>
-            <el-radio label="sentiment">情感分析</el-radio>
-            <el-radio label="timeline">时间线分析</el-radio>
-            <el-radio label="user">用户分析</el-radio>
+            <el-radio value="keyword">关键词分析</el-radio>
+            <el-radio value="sentiment">情感分析</el-radio>
+            <el-radio value="timeline">时间线分析</el-radio>
+            <el-radio value="user">用户分析</el-radio>
+            <el-radio value="all">
+              <span class="all-analysis">全部分析</span>
+              <el-tooltip content="一键执行所有分析项目" placement="top">
+                <el-icon><InfoFilled /></el-icon>
+              </el-tooltip>
+            </el-radio>
           </el-radio-group>
         </el-form-item>
         
         <el-form-item>
-          <el-button type="primary" @click="startAnalysis" :loading="analyzing">开始分析</el-button>
+          <el-button type="primary" @click="startAnalysis" :loading="analyzing">
+            {{ form.analysisType === 'all' ? '开始全面分析' : '开始分析' }}
+          </el-button>
         </el-form-item>
       </el-form>
       
@@ -82,9 +90,13 @@
 
 <script>
 import { videoApi, analysisApi } from '@/api';
+import { InfoFilled } from '@element-plus/icons-vue';
 
 export default {
   name: 'DanmakuAnalysis',
+  components: {
+    InfoFilled
+  },
   data() {
     return {
       form: {
@@ -137,7 +149,50 @@ export default {
       this.loadingAnalyses = true;
       analysisApi.getAnalyses()
         .then(response => {
-          this.analyses = response.data.results;
+          const analysisResults = response.data.results;
+          
+          // 先保存分析结果
+          this.analyses = analysisResults;
+          
+          // 如果有分析记录，则获取对应的视频标题
+          if (analysisResults && analysisResults.length > 0) {
+            // 收集所有不重复的视频BVID
+            const bvidSet = new Set();
+            analysisResults.forEach(analysis => {
+              if (analysis.video_bvid) {
+                bvidSet.add(analysis.video_bvid);
+              }
+            });
+            
+            // 将Set转为数组
+            const bvidList = Array.from(bvidSet);
+            
+            // 为每个BVID获取视频信息
+            const videoPromises = bvidList.map(bvid => 
+              videoApi.getVideoByBvid(bvid)
+                .then(resp => ({ bvid, title: resp.data.title }))
+                .catch(() => ({ bvid, title: `未知视频(${bvid})` }))  // 获取失败时设置默认标题
+            );
+            
+            // 等待所有视频信息请求完成
+            Promise.all(videoPromises)
+              .then(videoInfos => {
+                // 创建BVID到标题的映射
+                const bvidToTitleMap = {};
+                videoInfos.forEach(info => {
+                  bvidToTitleMap[info.bvid] = info.title;
+                });
+                
+                // 更新分析记录，添加视频标题
+                this.analyses = this.analyses.map(analysis => ({
+                  ...analysis,
+                  video_title: bvidToTitleMap[analysis.video_bvid] || `未知视频(${analysis.video_bvid})`
+                }));
+              })
+              .catch(error => {
+                console.error('获取视频信息失败:', error);
+              });
+          }
         })
         .catch(error => {
           console.error('获取分析记录失败:', error);
@@ -165,20 +220,33 @@ export default {
           
           console.log(`准备分析视频: ${video.title}, BVID: ${video.bvid}, 分析类型: ${this.form.analysisType}`);
           
+          const isFullAnalysis = this.form.analysisType === 'all';
+          const message = isFullAnalysis ? '正在进行全面分析，请耐心等待...' : '正在进行分析，请稍候...';
+          this.$message({
+            message: message,
+            type: 'info',
+            duration: 3000
+          });
+          
           // 开始分析
           return analysisApi.analyze(video.bvid, this.form.analysisType);
         })
         .then(response => {
           console.log('分析完成:', response.data);
-          this.$message.success('分析完成');
+          const isFullAnalysis = this.form.analysisType === 'all';
+          const message = isFullAnalysis ? '全面分析完成' : '分析完成';
+          this.$message.success(message);
           this.fetchAnalyses();
           
           // 获取刚刚创建的分析记录，跳转到结果页面
           setTimeout(() => {
-            const latestAnalysis = this.analyses[0];
-            if (latestAnalysis) {
-              this.viewAnalysis(latestAnalysis);
-            }
+            this.fetchAnalyses(); // 再次获取最新的分析结果
+            setTimeout(() => {
+              const latestAnalysis = this.analyses[0];
+              if (latestAnalysis) {
+                this.viewAnalysis(latestAnalysis);
+              }
+            }, 500);
           }, 1000);
         })
         .catch(error => {
@@ -230,7 +298,8 @@ export default {
         'keyword': 'primary',
         'sentiment': 'success',
         'timeline': 'info',
-        'user': 'warning'
+        'user': 'warning',
+        'all': 'danger'
       };
       return types[type] || 'info';
     },
@@ -239,7 +308,8 @@ export default {
         'keyword': '关键词',
         'sentiment': '情感',
         'timeline': '时间线',
-        'user': '用户'
+        'user': '用户',
+        'all': '全部分析'
       };
       return texts[type] || type;
     }
@@ -266,5 +336,10 @@ export default {
 
 .el-divider {
   margin: 30px 0;
+}
+
+.all-analysis {
+  margin-right: 5px;
+  font-weight: bold;
 }
 </style>

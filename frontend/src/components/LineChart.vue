@@ -67,6 +67,36 @@ export default {
     episodeBoundaries: {
       type: Array,
       default: () => []
+    },
+    // Y轴最小值（可选）
+    yAxisMin: {
+      type: Number,
+      default: null
+    },
+    // Y轴最大值（可选）
+    yAxisMax: {
+      type: Number,
+      default: null
+    },
+    // Y轴标签（可选）
+    yAxisLabel: {
+      type: String,
+      default: ''
+    },
+    // 是否为数据点着色
+    colorPoints: {
+      type: Boolean,
+      default: false
+    },
+    // 获取数据点颜色的函数
+    getPointColor: {
+      type: Function,
+      default: null
+    },
+    // 自定义提示格式化函数
+    tooltipFormatter: {
+      type: Function,
+      default: null
     }
   },
   data() {
@@ -74,7 +104,14 @@ export default {
       chart: null,
       observer: null,
       visibleData: [],
-      hoveredPoint: null
+      hoveredPoint: null,
+      stats: {
+        max: 0,
+        average: 0,
+        total: 0
+      },
+      activePoint: null,
+      resizeTimeout: null  // 添加ResizeTimeout变量，用于防抖处理
     };
   },
   watch: {
@@ -99,14 +136,32 @@ export default {
     this.initChart();
     
     // 添加ResizeObserver以便在容器大小变化时重绘图表
-    this.observer = new ResizeObserver(() => {
-      this.drawChart();
-    });
-    this.observer.observe(this.$refs.chartContainer);
+    try {
+      this.observer = new ResizeObserver(entries => {
+        if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
+        this.resizeTimeout = setTimeout(() => {
+          if (this.$refs.chartContainer) {
+            this.drawChart();
+          }
+        }, 60); // 60ms延迟，避免同步触发
+      });
+      if (this.$refs.chartContainer) {
+        this.observer.observe(this.$refs.chartContainer);
+      }
+    } catch (err) {
+      console.error('Failed to create ResizeObserver:', err);
+    }
   },
   beforeUnmount() {
     if (this.observer) {
-      this.observer.disconnect();
+      try {
+        this.observer.disconnect();
+      } catch (err) {
+        console.error('Error disconnecting observer:', err);
+      }
+    }
+    if (this.resizeTimeout) {
+      clearTimeout(this.resizeTimeout);
     }
   },
   methods: {
@@ -118,6 +173,19 @@ export default {
     },
     initChart() {
       this.drawChart();
+    },
+    setViewport(start, end) {
+      // 设置视口范围，更新可见数据点并重绘图表
+      if (typeof start === 'number' && typeof end === 'number' && start < end) {
+        console.log(`LineChart.setViewport(${start}, ${end})`);
+        // 更新视口
+        this._viewportStart = start;
+        this._viewportEnd = end;
+        // 更新可见数据
+        this.updateVisibleData();
+        // 重绘图表
+        this.drawChart();
+      }
     },
     drawChart() {
       const container = this.$refs.chartContainer;
@@ -158,8 +226,17 @@ export default {
       
       // 找出数据的最大值和最小值
       const mergedData = this.mergeDataPoints(this.visibleData, null, xScale);
-      const maxValue = Math.max(...mergedData.map(d => d.value));
-      const minValue = Math.min(...mergedData.map(d => d.value));
+      let maxValue = Math.max(...mergedData.map(d => d.value));
+      let minValue = Math.min(...mergedData.map(d => d.value));
+      
+      // 使用自定义的Y轴范围（如果提供）
+      if (this.yAxisMin !== null) {
+        minValue = this.yAxisMin;
+      }
+      if (this.yAxisMax !== null) {
+        maxValue = this.yAxisMax;
+      }
+      
       const valueRange = maxValue - minValue;
       const yScale = chartHeight / (valueRange > 0 ? valueRange : 1);
       
@@ -206,6 +283,19 @@ export default {
       const gridStep = height / gridCount;
       const valueStep = (maxValue - minValue) / gridCount;
       
+      // 添加Y轴标签（如果提供）
+      if (this.yAxisLabel) {
+        const yAxisLabelElem = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        yAxisLabelElem.setAttribute('transform', `rotate(-90)`);
+        yAxisLabelElem.setAttribute('x', -height / 2);
+        yAxisLabelElem.setAttribute('y', -35);
+        yAxisLabelElem.setAttribute('font-size', '12');
+        yAxisLabelElem.setAttribute('text-anchor', 'middle');
+        yAxisLabelElem.setAttribute('fill', 'rgba(0,0,0,0.7)');
+        yAxisLabelElem.textContent = this.yAxisLabel;
+        gridGroup.appendChild(yAxisLabelElem);
+      }
+      
       // 添加水平网格线
       for (let i = 0; i <= gridCount; i++) {
         const y = i * gridStep;
@@ -220,14 +310,14 @@ export default {
         gridGroup.appendChild(line);
         
         // 添加Y轴刻度值
-        const value = Math.round(maxValue - i * valueStep);
+        const value = minValue + (maxValue - minValue) * (1 - i / gridCount);
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         text.setAttribute('x', -5);
         text.setAttribute('y', y + 4); // 调整垂直位置以对齐网格线
         text.setAttribute('font-size', '11');
         text.setAttribute('text-anchor', 'end');
         text.setAttribute('fill', 'rgba(0,0,0,0.6)');
-        text.textContent = value;
+        text.textContent = value.toFixed(2);
         gridGroup.appendChild(text);
       }
       
@@ -357,8 +447,22 @@ export default {
         circle.setAttribute('cx', x);
         circle.setAttribute('cy', y);
         circle.setAttribute('r', this.pointRadius);
-        circle.setAttribute('fill', 'white');
-        circle.setAttribute('stroke', this.lineColor);
+        
+        // 设置填充颜色 - 支持自定义颜色
+        let fillColor = 'white';
+        let strokeColor = this.lineColor;
+        
+        if (this.colorPoints && this.getPointColor && typeof this.getPointColor === 'function') {
+          try {
+            fillColor = this.getPointColor(point) || fillColor;
+            strokeColor = fillColor; // 使用相同的颜色作为边框
+          } catch (err) {
+            console.error('获取数据点颜色失败:', err);
+          }
+        }
+        
+        circle.setAttribute('fill', fillColor);
+        circle.setAttribute('stroke', strokeColor);
         circle.setAttribute('stroke-width', '2');
         circle.setAttribute('class', 'data-point');
         
@@ -371,9 +475,15 @@ export default {
         
         // 添加提示
         const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-        title.textContent = `时间段: ${this.formatTime(point.start)} - ${this.formatTime(endTime)}\n弹幕数: ${point.value}`;
-        circle.appendChild(title);
         
+        // 使用自定义工具提示格式化器（如果提供）
+        if (this.tooltipFormatter && typeof this.tooltipFormatter === 'function') {
+          title.innerHTML = this.tooltipFormatter(point);
+        } else {
+          title.textContent = `时间段: ${this.formatTime(point.start)} - ${this.formatTime(endTime)}\n弹幕数: ${point.value}`;
+        }
+        
+        circle.appendChild(title);
         pointsGroup.appendChild(circle);
       });
       

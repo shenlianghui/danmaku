@@ -189,7 +189,19 @@ const handleLogin = async () => {
           ElMessage.success('登录成功')
           router.push({ name: 'Dashboard' })
         } else {
-          error.value = result.error || '登录失败'
+          if (typeof result.error === 'object' && result.error !== null) {
+            if (Array.isArray(result.error)) {
+              error.value = result.error[0] || '登录失败'
+            } else {
+              const errorMessages = Object.values(result.error)
+                .map(e => Array.isArray(e) ? e.join(', ') : e)
+                .join('; ')
+              error.value = errorMessages || '登录失败'
+            }
+          } else {
+            error.value = result.error || '登录失败'
+          }
+          
           if (result.attempts_left !== undefined) {
             attemptsLeft.value = result.attempts_left
           }

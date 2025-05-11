@@ -70,11 +70,26 @@ const loadFromStorage = () => {
     
     // 从存储中加载用户
     const userJson = localStorage.getItem(STORAGE_KEY);
-    if (!userJson) return null;
-    
+    if (!userJson) {
+        // 未找到用户数据，清除过期时间
+        localStorage.removeItem(SESSION_EXPIRY_KEY);
+        return null;
+    }
+
     try {
-        return JSON.parse(userJson);
+        const userData = JSON.parse(userJson);
+        // 确保用户数据有效（不只是检查存在，还检查是否有用户名等基本信息）
+        if (!userData || !userData.username) {
+            // 数据无效，清除存储
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(SESSION_EXPIRY_KEY);
+            return null;
+        }
+        return userData;
     } catch (e) {
+        // JSON解析错误，清除存储
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(SESSION_EXPIRY_KEY);
         return null;
     }
 };
@@ -137,7 +152,7 @@ export const useAuthStore = defineStore('auth', {
                 
                 console.log('用户API响应:', response.status)
                 
-                if (response.data) {
+                if (response.data && response.data.username) {
                     this.user = response.data
                     this.isAuthenticated = true
                     // 保存到本地存储
@@ -145,7 +160,7 @@ export const useAuthStore = defineStore('auth', {
                     console.log('用户已认证:', this.user.username)
                     return true
                 } else {
-                    console.warn('用户API返回空数据')
+                    console.warn('用户API返回无效数据:', response.data)
                     this.clearUserData()
                     return false
                 }
@@ -199,7 +214,26 @@ export const useAuthStore = defineStore('auth', {
                     }
                     // 处理普通错误
                     else {
-                        errorResponse.error = data.error || '登录失败';
+                        // 添加错误处理逻辑，确保错误信息是字符串
+                        if (data.error && typeof data.error === 'object') {
+                            // 如果错误是数组
+                            if (Array.isArray(data.error)) {
+                                errorResponse.error = data.error[0] || '登录失败';
+                            }
+                            // 如果错误是对象，可能包含多个字段的错误
+                            else {
+                                const errorMessages = Object.entries(data.error)
+                                    .map(([field, msgs]) => {
+                                        const fieldMsgs = Array.isArray(msgs) ? msgs.join(', ') : msgs;
+                                        return `${field}: ${fieldMsgs}`;
+                                    })
+                                    .join('; ');
+                                errorResponse.error = errorMessages || '登录失败';
+                            }
+                        } else {
+                            errorResponse.error = data.error || '登录失败';
+                        }
+                        
                         if (data.attempts_left !== undefined) {
                             errorResponse.attempts_left = data.attempts_left;
                         }
@@ -242,7 +276,35 @@ export const useAuthStore = defineStore('auth', {
                 let errorResponse = { success: false };
                 
                 if (error.response && error.response.data) {
-                    errorResponse.error = error.response.data.error || error.response.data;
+                    // 添加错误处理逻辑，确保错误信息是字符串
+                    const data = error.response.data;
+                    if (data.error && typeof data.error === 'object') {
+                        // 如果错误是数组
+                        if (Array.isArray(data.error)) {
+                            errorResponse.error = data.error[0] || '注册失败';
+                        }
+                        // 如果错误是对象，可能包含多个字段的错误
+                        else {
+                            const errorMessages = Object.entries(data.error)
+                                .map(([field, msgs]) => {
+                                    const fieldMsgs = Array.isArray(msgs) ? msgs.join(', ') : msgs;
+                                    return `${field}: ${fieldMsgs}`;
+                                })
+                                .join('; ');
+                            errorResponse.error = errorMessages || '注册失败';
+                        }
+                    } else if (typeof data === 'object' && !data.error) {
+                        // 处理Django REST Framework常见的错误格式，字段直接作为对象的键
+                        const errorMessages = Object.entries(data)
+                            .map(([field, msgs]) => {
+                                const fieldMsgs = Array.isArray(msgs) ? msgs.join(', ') : msgs;
+                                return `${field}: ${fieldMsgs}`;
+                            })
+                            .join('; ');
+                        errorResponse.error = errorMessages || '注册失败';
+                    } else {
+                        errorResponse.error = data.error || '注册失败';
+                    }
                 } else {
                     errorResponse.error = '注册失败，请稍后重试';
                 }
@@ -302,7 +364,35 @@ export const useAuthStore = defineStore('auth', {
                 let errorResponse = { success: false };
                 
                 if (error.response && error.response.data) {
-                    errorResponse.error = error.response.data.error || '更新资料失败';
+                    // 添加错误处理逻辑，确保错误信息是字符串
+                    const data = error.response.data;
+                    if (data.error && typeof data.error === 'object') {
+                        // 如果错误是数组
+                        if (Array.isArray(data.error)) {
+                            errorResponse.error = data.error[0] || '更新资料失败';
+                        }
+                        // 如果错误是对象，可能包含多个字段的错误
+                        else {
+                            const errorMessages = Object.entries(data.error)
+                                .map(([field, msgs]) => {
+                                    const fieldMsgs = Array.isArray(msgs) ? msgs.join(', ') : msgs;
+                                    return `${field}: ${fieldMsgs}`;
+                                })
+                                .join('; ');
+                            errorResponse.error = errorMessages || '更新资料失败';
+                        }
+                    } else if (typeof data === 'object' && !data.error) {
+                        // 处理Django REST Framework常见的错误格式，字段直接作为对象的键
+                        const errorMessages = Object.entries(data)
+                            .map(([field, msgs]) => {
+                                const fieldMsgs = Array.isArray(msgs) ? msgs.join(', ') : msgs;
+                                return `${field}: ${fieldMsgs}`;
+                            })
+                            .join('; ');
+                        errorResponse.error = errorMessages || '更新资料失败';
+                    } else {
+                        errorResponse.error = data.error || '更新资料失败';
+                    }
                 } else {
                     errorResponse.error = '更新资料请求发生错误';
                 }

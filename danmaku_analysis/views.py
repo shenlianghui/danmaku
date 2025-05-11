@@ -10,8 +10,8 @@ import traceback
 import json
 
 from danmaku_crawler.models import Video
-from .models import DanmakuAnalysis, KeywordExtraction, SentimentAnalysis
-from .serializers import AnalysisSerializer, KeywordSerializer, SentimentSerializer
+from .models import DanmakuAnalysis
+from .serializers import AnalysisSerializer
 from .analyzer import analyze_video_danmaku
 # 检查BERT模型是否可用
 from .bert_sentiment import bert_analyzer
@@ -102,7 +102,7 @@ class AnalysisViewSet(viewsets.ReadOnlyModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # 验证分析类型是否有效
-        valid_types = ['keyword', 'sentiment', 'timeline', 'user_activity', None]
+        valid_types = ['keyword', 'sentiment', 'timeline', 'user', 'all', None]
         if analysis_type not in valid_types:
             logger.error(f"无效的分析类型: {analysis_type}")
             return Response({
@@ -425,42 +425,3 @@ class AnalysisViewSet(viewsets.ReadOnlyModelViewSet):
         }
         
         return Response(config_data)
-
-class KeywordViewSet(viewsets.ReadOnlyModelViewSet):
-    """关键词提取结果视图集"""
-    queryset = KeywordExtraction.objects.all().order_by('-weight')
-    serializer_class = KeywordSerializer
-    permission_classes = [permissions.AllowAny]  # 允许所有人访问
-    
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        
-        # 按视频BV号筛选
-        bvid = self.request.query_params.get('bvid', None)
-        if bvid:
-            video = get_object_or_404(Video, bvid=bvid)
-            queryset = queryset.filter(video=video)
-        
-        return queryset
-
-class SentimentViewSet(viewsets.ReadOnlyModelViewSet):
-    """情感分析结果视图集"""
-    queryset = SentimentAnalysis.objects.all().order_by('segment_start')
-    serializer_class = SentimentSerializer
-    permission_classes = [permissions.AllowAny]  # 允许所有人访问
-    
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        
-        # 按视频BV号筛选
-        bvid = self.request.query_params.get('bvid', None)
-        if bvid:
-            video = get_object_or_404(Video, bvid=bvid)
-            queryset = queryset.filter(video=video)
-        
-        # 按情感倾向筛选
-        sentiment = self.request.query_params.get('sentiment', None)
-        if sentiment:
-            queryset = queryset.filter(sentiment=sentiment)
-        
-        return queryset 

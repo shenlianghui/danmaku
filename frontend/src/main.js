@@ -51,12 +51,23 @@ async function initApp() {
       try {
         const userResult = await authStore.fetchUser()
         console.log('用户信息获取结果:', userResult)
+        // 再次检查用户是否有效
+        if (authStore.isAuthenticated && (!authStore.user || !authStore.user.username)) {
+          console.error('初始化检测到无效的用户数据，清除认证状态')
+          authStore.clearUserData()
+        }
       } catch (userError) {
         console.error('获取用户信息时出错:', userError)
-        // 继续执行，不阻止应用挂载
+        // 确保出错时清除任何不一致的认证状态
+        authStore.clearUserData()
       }
     } else {
-      console.log('从本地存储恢复用户:', authStore.user?.username)
+      console.log('从本地存储恢复用户:', authStore.user?.username || '无效用户')
+      // 验证恢复的用户数据
+      if (!authStore.user || !authStore.user.username) {
+        console.error('本地存储的用户数据无效，清除认证状态')
+        authStore.clearUserData()
+      }
     }
     
     console.log('初始化完成，认证状态:', authStore.isAuthenticated ? '已登录' : '未登录')

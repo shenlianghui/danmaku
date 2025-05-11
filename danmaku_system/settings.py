@@ -96,7 +96,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'danmaku_db',
         'USER': 'root',
-        'PASSWORD': 'root',
+        'PASSWORD': 'admin',
         'HOST': 'localhost',
         'PORT': '3306',
     }
@@ -188,8 +188,8 @@ CORS_ALLOW_HEADERS = [
 
 # CSRF可信来源
 CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:8081',
-    'http://127.0.0.1:8081',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
     'http://localhost:8000',
     'http://127.0.0.1:8000',
 ]
