@@ -98,28 +98,39 @@ export const videoApi = {
   
   // 按BV号获取视频
   getVideoByBvid(bvid) {
-    // 检查bvid是否有效
-    if (!bvid || bvid === 'undefined') {
-      console.error('getVideoByBvid: 无效的BVID参数');
-      return Promise.reject(new Error('无效的视频BVID'));
+    if (!bvid || bvid === 'undefined' || typeof bvid !== 'string' || bvid.trim() === '') {
+      console.error('videoApi.getVideoByBvid: 无效的BVID参数提供:', bvid);
+      return Promise.reject(new Error('无效的视频BVID参数'));
     }
-    
-    console.log(`通过BVID查询视频: ${bvid}`);
-    
-    // 确保在查询视频时考虑当前用户
-    return api.get('/videos/', { params: { bvid, user: 'current' } })
+
+    console.log(`API: 正在通过BVID查询视频: ${bvid} (用户: current)`);
+
+    return api.get('/videos/', { params: { bvid: bvid.trim(), user: 'current' } }) // Ensure bvid is trimmed
       .then(response => {
         const videos = response.data.results;
-        if (videos && videos.length > 0) {
-          console.log(`成功找到视频: ${videos[0].title}`);
+        console.log(`API: /videos/?bvid=${bvid} 响应:`, response.data);
+
+        if (videos && videos.length === 1) {
+          // 精确匹配到一个视频
+          console.log(`API: 成功找到视频: ${videos[0].title} (ID: ${videos[0].id})`);
+          return { data: videos[0] }; // 返回包含视频对象的 data 属性
+        } else if (videos && videos.length > 1) {
+          // 理论上不应该发生，因为 (bvid, user) 是 unique_together
+          console.warn(`API: 找到多个视频匹配 BVID ${bvid} 和当前用户。返回第一个。`, videos);
           return { data: videos[0] };
+        } else {
+          // 没有找到视频
+          console.error(`API: 未找到 BVID 为 ${bvid} 且属于当前用户的视频。`);
+          throw new Error(`未找到视频 (BVID: ${bvid})`);
         }
-        // 如果当前用户没有这个视频，可能是新视频或者是其他用户的视频
-        console.error(`未找到视频: BVID=${bvid}`);
-        throw new Error('未找到视频');
+      })
+      .catch(error => {
+        console.error(`API:getVideoByBvid 请求失败 for BVID ${bvid}:`, error.response || error.message || error);
+        // 将错误传递下去，以便调用者可以处理
+        return Promise.reject(error.response?.data?.detail || error.message || `获取视频 ${bvid} 失败`);
       });
   },
-  
+
   // 获取视频弹幕
   getVideoDanmakus(id, params) {
     const queryParams = { ...params, user: 'current' };

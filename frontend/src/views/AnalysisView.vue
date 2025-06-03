@@ -107,53 +107,56 @@
             </el-row>
           </div>
           
-          <div class="sentiment-charts">
-            <div class="sentiment-timeline">
-              <LineChart 
+                   <!-- 情感分析 -->
+                   <div class="sentiment-charts">
+            <div class="sentiment-timeline"> <!-- 这个容器负责图表的外部边框和背景 -->
+              <LineChart
                 v-if="formattedSentimentData.length > 0"
                 :viewportStart="0"
-                :viewportEnd="video.duration ? video.duration * 1000 : 600000" 
-                :data="formattedSentimentData" 
-                :height="350"
-                :lineColor="'rgba(245, 108, 108, 0.8)'"
-                :fillColor="'rgba(245, 108, 108, 0.2)'"
+                :viewportEnd="video.duration ? video.duration * 1000 : 600000"
+                :data="formattedSentimentData"
+                :height="380" <!-- 控制LineChart内部SVG的高度 -->
+                lineColor="rgba(255, 107, 107, 0.9)" <!-- 示例：情感可用红色系 -->
+                fillColor="rgba(255, 107, 107, 0.15)"
                 :lineWidth="2"
-                :pointRadius="4"
+                :pointRadius="3" <!-- 可以调小一点，如果点太多 -->
                 :smooth="true"
                 :showGrid="true"
                 :colorPoints="true"
                 :getPointColor="getSentimentPointColor"
-                :tooltipFormatter="formatSentimentTooltip"
+                :tooltipFormatter="formatSentimentTooltip" <!-- **传递tooltip格式化函数** -->
                 :yAxisMin="0"
                 :yAxisMax="1"
-                yAxisLabel="情感得分"
+                yAxisLabel="情感倾向 (0消极-1积极)" <!-- **设置Y轴标签** -->
+                :episodeBoundaries="episodeBoundaries" <!-- 传递分P边界 -->
               />
               <el-empty v-else description="暂无情感时间线数据"></el-empty>
             </div>
-            
-            <div class="sentiment-table-container">
-              <el-table :data="sentimentSegments" style="width: 100%" max-height="400">
+
+            <div class="sentiment-table-container"> <!-- 这个容器负责表格的外部边框和背景 -->
+              <el-table :data="sentimentSegments" style="width: 100%" max-height="380" stripe border>
+                <!-- 表格列定义不变 -->
                 <el-table-column label="时间段" width="180">
                   <template #default="{ row }">
                     {{ formatDuration(row.segment_start) }} - {{ formatDuration(row.segment_end) }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="sentiment" label="情感" width="100">
+                <el-table-column prop="sentiment" label="情感" width="100" align="center">
                   <template #default="{ row }">
-                    <el-tag :type="getSentimentType(row.sentiment)">
+                    <el-tag :type="getSentimentType(row.sentiment)" size="small">
                       {{ getSentimentText(row.sentiment) }}
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="score" label="情感得分" width="100">
+                <el-table-column prop="score" label="情感得分" width="100" align="center">
                   <template #default="{ row }">
-                    {{ row.score.toFixed(2) }}
+                    {{ (typeof row.score === 'number' ? row.score : 0).toFixed(2) }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="danmaku_count" label="弹幕数" width="80"></el-table-column>
-                <el-table-column label="情感分布">
+                <el-table-column prop="danmaku_count" label="弹幕数" width="80" align="center"></el-table-column>
+                <el-table-column label="情感分布（示例）" min-width="150">
                   <template #default="{ row }">
-                    <el-progress :percentage="getSentimentPercentage(row)" :colors="sentimentColors"></el-progress>
+                    <el-progress :percentage="getSentimentPercentage(row)" :color="getSentimentProgressColor(row.sentiment)"></el-progress>
                   </template>
                 </el-table-column>
               </el-table>
@@ -446,7 +449,8 @@ export default {
       danmakuData: [],
       apiBaseUrl: process.env.VUE_APP_API_BASE_URL,
       showAllEpisodes: false,
-      currentViewport: null
+      currentViewport: null,
+      resizeObserverCleanup: null,
     };
   },
   created() {
@@ -1564,64 +1568,57 @@ export default {
             return [];
         }
     },
-    formattedTimelineData() {
+        // (确保你有 formattedTimelineData 计算属性，如果时间线部分也用 LineChart)
+        formattedTimelineData() { // 为时间线部分的 LineChart 准备数据
       if (!this.timelineSummary || !Array.isArray(this.timelineSummary.timeline)) {
         return [];
       }
-      
-      let timelineData = this.timelineSummary.timeline;
-      
-      // 如果是查看某个特定分P，需要筛选该分P的数据
+      let dataToUse = this.timelineSummary.timeline;
       if (this.currentEpisode !== null) {
         const boundary = this.episodeBoundaries.find(b => b.page_id === this.currentEpisode);
-        if (!boundary) return [];
-        
-        // 筛选当前分P的数据点
-        timelineData = timelineData.filter(item => item.page_id === this.currentEpisode);
-        
-        // 返回原始时间数据，不再减去起始时间
-        return timelineData.map(item => ({
-          start: item.time * 1000, // 保持原始时间（毫秒）
-          value: item.count || 0
-        }));
+        if (boundary) {
+            dataToUse = this.timelineSummary.timeline.filter(item =>
+                item.page_id === this.currentEpisode &&
+                (item.time * 1000) >= (boundary.start_time_sec * 1000) &&
+                (item.time * 1000) < (boundary.end_time_sec * 1000) // 使用 < 而不是 <= 来定义时间段
+            );
+        } else {
+            dataToUse = [];
+        }
       }
-      
-      // 整体视图，直接转换
-      return timelineData.map(item => ({
-        start: item.time * 1000, // 转换为毫秒
-        value: item.count || 0
+      return dataToUse.map(item => ({
+        start: (item.time || 0) * 1000, // 后端时间是秒，转为毫秒
+        value: item.count || 0,
+        // 你可以添加更多原始数据到这里，如果 tooltipFormatter 需要的话
+        page_id: item.page_id
       }));
     },
     formattedSentimentData() {
       if (!this.sentimentResult || !Array.isArray(this.sentimentResult.segments)) {
         return [];
       }
-      
-      // 将情感得分映射到数值，用于绘制图表
       return this.sentimentResult.segments.map(segment => {
-        // 情感得分值根据情感类型映射为标准化值
-        // positive: 0.5-1.0, neutral: 0.4-0.6, negative: 0-0.5
-        let scoreValue = segment.score;
-        if (segment.sentiment === 'positive') {
-          // 确保正面情感得分在0.5-1.0范围
-          scoreValue = 0.5 + (Math.abs(segment.score) * 0.5);
-        } else if (segment.sentiment === 'negative') {
-          // 确保负面情感得分在0-0.5范围
-          scoreValue = 0.5 - (Math.abs(segment.score) * 0.5);
+        let scoreValue = segment.score; // 原始情感得分，例如 -1 到 1
+        // 将情感得分映射到 LineChart 的 Y 轴值 (例如 0-1 范围)
+        // 这个映射逻辑取决于你的原始情感得分范围和期望的展示范围
+        // 示例：如果原始得分是 -1 (消极) 到 1 (积极)，0 (中性)
+        // 映射到 0 (消极) - 0.5 (中性) - 1 (积极)
+        if (typeof segment.score === 'number') {
+            scoreValue = (segment.score + 1) / 2; // 简单线性映射
         } else {
-          // 中性情感在0.4-0.6范围
-          scoreValue = 0.5 + (segment.score * 0.1);
+            scoreValue = 0.5; // 默认中性
         }
-        
+        scoreValue = Math.max(0, Math.min(1, scoreValue)); // 确保在 0-1 之间
+
         return {
-          start: segment.segment_start,
-          value: scoreValue, // 使用映射后的得分值
-          sentiment: segment.sentiment,
-          originalScore: segment.score,
-          danmaku_count: segment.danmaku_count || 0
+          start: segment.segment_start,        // X 轴时间 (毫秒)
+          value: scoreValue,                   // Y 轴绘制的值 (映射后的 0-1)
+          sentiment: segment.sentiment,        // 原始情感类别 ('positive', 'neutral', 'negative')
+          originalScore: segment.score,        // 原始情感得分 (例如 -0.8, 0.2, 0.9)
+          danmaku_count: segment.danmaku_count || 0 // 该时间段的实际弹幕数
         };
       });
-    }
+    },
   },
   beforeDestroy() {
     window.removeEventListener('resize', this.handleTimelineResize);
@@ -1690,6 +1687,13 @@ export default {
   gap: 20px;
 }
 
+.sentiment-charts {
+  display: flex;
+  flex-direction: column; /* 默认是列布局 */
+  gap: 20px;
+  margin-top: 20px; /* 给图表和表格整体一个上边距 */
+}
+
 .word-cloud-container, .timeline-chart, .user-distribution-chart {
   height: 400px;
   border: 1px solid #ebeef5;
@@ -1699,10 +1703,14 @@ export default {
 }
 
 .sentiment-timeline {
-  height: 400px;
+  /* 移除这里的 padding，让 LineChart 组件自己控制其内部的 padding */
+  /* 或者，如果 LineChart 没有内部 padding，你可以在这里设置与表格一致的 padding */
+  /* padding: 20px; */
   border: 1px solid #ebeef5;
   border-radius: 4px;
-  background-color: #f8f9fa;
+  background-color: #f8f9fa; /* 可以保留背景色 */
+  /* height: 400px; */ /* LineChart 组件应该有自己的 height prop */
+  /* overflow: hidden; */ /* 如果 LineChart 内容可能溢出 */
 }
 
 .keyword-table-container, .sentiment-table-container, .timeline-peaks-container, .top-users {
@@ -1765,6 +1773,13 @@ export default {
   color: #f56c6c;
 }
 
+.sentiment-table-container {
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  padding: 20px; /* 保留表格容器的 padding */
+  background-color: #fff; /* 通常表格背景是白色 */
+}
+
 @media (min-width: 768px) {
   .keyword-charts, .sentiment-charts, .timeline-charts {
     flex-direction: row;
@@ -1776,6 +1791,20 @@ export default {
   
   .keyword-table-container, .sentiment-table-container, .timeline-peaks-container {
     width: 40%;
+  }
+
+  .sentiment-charts {
+    flex-direction: row;
+    align-items: flex-start; /* 尝试顶部对齐 */
+  }
+  .sentiment-timeline {
+    width: 60%;
+    /* 如果 LineChart 内部没有边距，可以在这里设置 */
+    /* padding: 20px; */
+  }
+  .sentiment-table-container {
+    width: 40%;
+    /* padding: 20px; /* 已有 */
   }
 }
 

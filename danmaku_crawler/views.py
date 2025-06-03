@@ -19,19 +19,36 @@ class VideoViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.AllowAny]
     
     def get_queryset(self):
-        """根据用户过滤视频列表"""
-        queryset = super().get_queryset()
-        
+        """根据用户和查询参数过滤视频列表。"""
+        queryset = super().get_queryset() # Video.objects.all().order_by('-created_at')
+
         if not self.request.user.is_authenticated:
             return Video.objects.none()
-            
-        user_param = self.request.query_params.get('user', None)
+
+        user_param = self.request.query_params.get('user', 'current')
         if user_param == 'all' and self.request.user.is_staff:
-            # 管理员可以查看全部视频
-            return queryset
+            pass # 管理员查看所有
+        else: # 包含 'current' 或特定用户ID (如果支持)
+            queryset = queryset.filter(user=self.request.user)
+
+        # **关键的 BVID 过滤**
+        bvid_param = self.request.query_params.get('bvid', None)
+        if bvid_param:
+            # 这个过滤应该确保在应用了用户过滤后，只留下具有特定 BVID 的视频。
+            # 由于 (bvid, user) 是 unique_together, 理论上这里最多只会有一条记录。
+            queryset = queryset.filter(bvid=bvid_param)
         
-        # 其他情况只返回当前用户的视频
-        return queryset.filter(user=self.request.user)
+        search_param = self.request.query_params.get('search', None)
+        if search_param:
+            from django.db.models import Q
+            queryset = queryset.filter(
+                Q(title__icontains=search_param) | 
+                Q(bvid__icontains=search_param) |
+                Q(owner__icontains=search_param)
+            )
+        
+        # 对于列表视图，保持排序。对于 getVideoByBvid 的调用，我们期望只有一个结果。
+        return queryset
     
     @action(detail=True, methods=['get'])
     def danmakus(self, request, pk=None):
